@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN readme_fetched_at DATETIME;
