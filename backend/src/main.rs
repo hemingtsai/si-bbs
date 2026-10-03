@@ -12,16 +12,29 @@ async fn main() {
         )
         .init();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://si-bbs.db?mode=rwc".to_string());
+    let database_url =
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://si-bbs.db?mode=rwc".to_string());
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await
         .expect("connect sqlite");
-    sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await.ok();
-    sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await.ok();
-    sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await.ok();
+    sqlx::query("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("PRAGMA synchronous=NORMAL")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrate");
 
     let app = axum::Router::new()
         .route("/api/health", axum::routing::get(|| async { "ok" }))
