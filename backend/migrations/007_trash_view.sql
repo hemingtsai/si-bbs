@@ -1,0 +1,6 @@
+CREATE VIEW trash_view AS
+SELECT 'wiki'    AS kind, id, title AS name, deleted_at, deleted_by FROM wiki_pages WHERE deleted_at IS NOT NULL
+UNION ALL
+SELECT 'project' AS kind, id, name  AS name, deleted_at, deleted_by FROM projects   WHERE deleted_at IS NOT NULL
+UNION ALL
+SELECT 'comment' AS kind, id, substr(content, 1, 50) AS name, deleted_at, deleted_by FROM comments WHERE deleted_at IS NOT NULL;
