@@ -1,0 +1,10 @@
+/target
+node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store
