@@ -1,0 +1,3 @@
+-- SI BBS initial schema. Applied automatically via sqlx::migrate!() on startup.
+-- Migrations run in filename order: 001_users, 002_wiki_pages, 003_projects,
+-- 004_ratings, 005_comments, 006_soft_delete, 007_trash_view, 008_readme_fetched_at.
