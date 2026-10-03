@@ -1,0 +1,38 @@
+[package]
+name = "si-bbs-backend"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["hemingtsai"]
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
+mimalloc = { version = "0.1", default-features = false }
+argon2 = "0.5"
+jsonwebtoken = "9"
+reqwest = { version = "0.12", features = ["json", "gzip", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sonic-rs = "0.3"
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["compression-br", "compression-gzip", "trace", "cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+base64 = "0.22"
+
+[dev-dependencies]
+axum-test = "16"
+tokio-test = "0.4"
+wiremock = "0.6"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
