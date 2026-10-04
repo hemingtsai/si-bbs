@@ -11,16 +11,18 @@ pub fn require_auth(cfg: &Config, headers: &HeaderMap) -> Result<auth::Claims, A
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .ok_or(AppError::Unauthorized)?;
-    let token = raw
-        .strip_prefix("Bearer ")
-        .ok_or(AppError::Unauthorized)?;
+    let token = raw.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
     auth::verify(cfg, token, "access").map_err(|_| AppError::Unauthorized)
 }
 
 /// Require the caller to hold one of the given roles.
-pub fn require_role(cfg: &Config, headers: &HeaderMap, allowed: &[Role]) -> Result<auth::Claims, AppError> {
+pub fn require_role(
+    cfg: &Config,
+    headers: &HeaderMap,
+    allowed: &[Role],
+) -> Result<auth::Claims, AppError> {
     let claims = require_auth(cfg, headers)?;
-    let role = Role::from_str(&claims.role).ok_or(AppError::Forbidden)?;
+    let role = Role::parse(&claims.role).ok_or(AppError::Forbidden)?;
     if allowed.contains(&role) {
         Ok(claims)
     } else {

@@ -3,8 +3,8 @@
 //! Hashing is CPU-bound and runs inside `spawn_blocking` so it never stalls the
 //! async runtime. JWT signing/verification is cheap enough to call inline.
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::rngs::OsRng;
@@ -46,7 +46,13 @@ pub struct Claims {
     pub kind: String, // "access" | "refresh"
 }
 
-pub fn issue(cfg: &Config, user_id: i64, username: &str, role: Role, kind: &str) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn issue(
+    cfg: &Config,
+    user_id: i64,
+    username: &str,
+    role: Role,
+    kind: &str,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let ttl = match kind {
         "refresh" => Duration::seconds(cfg.refresh_ttl_secs),
@@ -67,14 +73,23 @@ pub fn issue(cfg: &Config, user_id: i64, username: &str, role: Role, kind: &str)
     )
 }
 
-pub fn issue_pair(cfg: &Config, user_id: i64, username: &str, role: Role) -> Result<(String, String), jsonwebtoken::errors::Error> {
+pub fn issue_pair(
+    cfg: &Config,
+    user_id: i64,
+    username: &str,
+    role: Role,
+) -> Result<(String, String), jsonwebtoken::errors::Error> {
     Ok((
         issue(cfg, user_id, username, role, "access")?,
         issue(cfg, user_id, username, role, "refresh")?,
     ))
 }
 
-pub fn verify(cfg: &Config, token: &str, expected_kind: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn verify(
+    cfg: &Config,
+    token: &str,
+    expected_kind: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
     let validation = Validation::default();
     let data = decode::<Claims>(
         token,

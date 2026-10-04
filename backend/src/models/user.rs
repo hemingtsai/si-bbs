@@ -18,7 +18,7 @@ impl Role {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(Self::Admin),
             "moderator" => Some(Self::Moderator),
@@ -41,6 +41,6 @@ pub struct User {
 
 impl User {
     pub fn role_enum(&self) -> Role {
-        Role::from_str(&self.role).unwrap_or(Role::User)
+        Role::parse(&self.role).unwrap_or(Role::User)
     }
 }

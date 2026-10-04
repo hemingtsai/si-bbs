@@ -70,7 +70,10 @@ async fn unauthenticated_me_returns_401() {
 async fn duplicate_register_returns_409() {
     let app = common::test_server().await;
     let body = json!({"username": "carol", "email": "carol@example.com", "password": "secret123"});
-    app.post("/api/auth/register").json(&body).await.assert_status_ok();
+    app.post("/api/auth/register")
+        .json(&body)
+        .await
+        .assert_status_ok();
     let res = app.post("/api/auth/register").json(&body).await;
     res.assert_status_conflict();
 }

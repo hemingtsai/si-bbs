@@ -7,7 +7,9 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .acquire_timeout(Duration::from_secs(5))
         .connect(database_url)
         .await?;
-    sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
+    sqlx::query("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await?;
     sqlx::query("PRAGMA synchronous=NORMAL")
         .execute(&pool)
         .await?;

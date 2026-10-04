@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::Json;
 use serde::Deserialize;
 
 use crate::error::AppError;
@@ -28,7 +28,7 @@ pub async fn register(
     }
     let hash = auth::hash_password(&body.password)
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     let res = sqlx::query(
         "INSERT INTO users (username, email, password_hash, role) VALUES (?1, ?2, ?3, 'user')",
     )
@@ -56,17 +56,16 @@ pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginReq>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, username, password_hash, role FROM users WHERE username = ?1",
-    )
-    .bind(&body.username)
-    .fetch_optional(&state.pool)
-    .await?;
+    let row: Option<(i64, String, String, String)> =
+        sqlx::query_as("SELECT id, username, password_hash, role FROM users WHERE username = ?1")
+            .bind(&body.username)
+            .fetch_optional(&state.pool)
+            .await?;
     let (id, username, hash, role_str) = row.ok_or(AppError::Unauthorized)?;
     if !auth::verify_password(&body.password, &hash) {
         return Err(AppError::Unauthorized);
     }
-    let role = Role::from_str(&role_str).unwrap_or(Role::User);
+    let role = Role::parse(&role_str).unwrap_or(Role::User);
     let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
@@ -87,7 +86,7 @@ pub async fn refresh(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let claims = auth::verify(&state.cfg, &body.refresh_token, "refresh")
         .map_err(|_| AppError::Unauthorized)?;
-    let role = Role::from_str(&claims.role).unwrap_or(Role::User);
+    let role = Role::parse(&claims.role).unwrap_or(Role::User);
     let (access, refresh) = auth::issue_pair(&state.cfg, claims.sub, &claims.username, role)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
