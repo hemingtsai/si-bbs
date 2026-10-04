@@ -26,6 +26,8 @@ pub async fn test_server() -> TestServer {
         jwt_secret: "test-secret".into(),
         access_ttl_secs: 900,
         refresh_ttl_secs: 7 * 24 * 3600,
+        github_token: String::new(),
+        github_api_base: "https://api.github.com".into(),
     };
     let app = create_router(AppState { pool, cfg });
     TestServer::new(app)
