@@ -1,9 +1,9 @@
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
 
 use crate::config::Config;
-use crate::handlers::{auth, project, rating};
+use crate::handlers::{auth, comment, project, rating};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,6 +25,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects/{id}/review", post(project::review))
         .route("/api/projects/{id}/rating", post(rating::rate))
         .route("/api/projects/{id}/rating/summary", get(rating::summary))
+        .route(
+            "/api/projects/{id}/comments",
+            get(comment::list).post(comment::create),
+        )
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
         .with_state(state)
 }

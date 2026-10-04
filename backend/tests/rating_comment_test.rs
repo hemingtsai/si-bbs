@@ -1,7 +1,7 @@
 mod common;
 
 use axum_test::TestServer;
-use common::{register_and_login, register_login_as_role, test_ctx};
+use common::{register_and_login, test_ctx};
 use si_bbs_backend::services::github::parse_repo_url;
 use sqlx::SqlitePool;
 
@@ -188,16 +188,132 @@ async fn rating_summary_is_public_and_zero_when_unrated() {
         .assert_status_ok();
 }
 
+async fn comment(
+    server: &TestServer,
+    token: &str,
+    project_id: i64,
+    content: &str,
+) -> axum_test::TestResponse {
+    server
+        .post(&format!("/api/projects/{project_id}/comments"))
+        .add_header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "content": content }))
+        .await
+}
+
 #[tokio::test]
-async fn pending_project_cannot_be_commented_on_yet() {
+async fn comment_is_created_with_author_username() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let project_id = seed_approved_project(&pool, "alice").await;
+
+    let res = comment(&server, &alice, project_id, "  works great  ").await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["username"], "alice");
+    assert_eq!(body["content"], "works great");
+    assert_eq!(body["project_id"], project_id);
+}
+
+#[tokio::test]
+async fn comment_requires_login_and_non_empty_content() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let project_id = seed_approved_project(&pool, "alice").await;
+
+    server
+        .post(&format!("/api/projects/{project_id}/comments"))
+        .json(&serde_json::json!({ "content": "hi" }))
+        .await
+        .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+
+    for bad in ["", "   ", "\n\t "] {
+        comment(&server, &alice, project_id, bad)
+            .await
+            .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    let long = "x".repeat(5001);
+    comment(&server, &alice, project_id, &long)
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn comment_list_is_public_ordered_and_paginated() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let bob = register_and_login(&server, "bob").await;
+    let project_id = seed_approved_project(&pool, "alice").await;
+
+    comment(&server, &alice, project_id, "first")
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    comment(&server, &bob, project_id, "second")
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server
+        .get(&format!("/api/projects/{project_id}/comments"))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["total"], 2);
+    assert_eq!(body["items"][0]["content"], "first");
+    assert_eq!(body["items"][1]["username"], "bob");
+
+    let res = server
+        .get(&format!(
+            "/api/projects/{project_id}/comments?per_page=1&page=2"
+        ))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["content"], "second");
+    assert_eq!(body["total"], 2);
+}
+
+#[tokio::test]
+async fn soft_deleted_comments_disappear_from_list() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let project_id = seed_approved_project(&pool, "alice").await;
+
+    comment(&server, &alice, project_id, "keep me")
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    comment(&server, &alice, project_id, "hide me")
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // Soft delete directly; the DELETE endpoints arrive with the trash phase.
+    sqlx::query("UPDATE comments SET deleted_at = CURRENT_TIMESTAMP WHERE content = 'hide me'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let res = server
+        .get(&format!("/api/projects/{project_id}/comments"))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["content"], "keep me");
+}
+
+#[tokio::test]
+async fn pending_project_cannot_be_commented_on() {
     let (server, pool) = test_ctx().await;
     let alice = register_and_login(&server, "alice").await;
     let project_id = seed_pending_project(&pool, "alice").await;
 
+    // Not visible yet, so commenting 404s rather than leaking its existence.
+    comment(&server, &alice, project_id, "nice")
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
     server
-        .post(&format!("/api/projects/{project_id}/comments"))
-        .add_header("Authorization", format!("Bearer {alice}"))
-        .json(&serde_json::json!({ "content": "nice" }))
+        .get(&format!("/api/projects/{project_id}/comments"))
         .await
         .assert_status(axum::http::StatusCode::NOT_FOUND);
 }

@@ -88,27 +88,27 @@ pub async fn submit(
          readme_fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'pending', \
          ?13, CURRENT_TIMESTAMP)",
     )
-        .bind(&meta.name)
-        .bind(&canonical_url)
-        .bind(&meta.owner)
-        .bind(&meta.repo)
-        .bind(description)
-        .bind(meta.readme.as_deref())
-        .bind(meta.language.as_deref())
-        .bind(meta.stars)
-        .bind(meta.forks)
-        .bind(meta.license.as_deref())
-        .bind(meta.topics.join(","))
-        .bind(category)
-        .bind(claims.sub)
-        .execute(&state.pool)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::Database(db) if db.is_unique_violation() => {
-                AppError::Conflict("this project has already been submitted".into())
-            }
-            other => AppError::from(other),
-        })?;
+    .bind(&meta.name)
+    .bind(&canonical_url)
+    .bind(&meta.owner)
+    .bind(&meta.repo)
+    .bind(description)
+    .bind(meta.readme.as_deref())
+    .bind(meta.language.as_deref())
+    .bind(meta.stars)
+    .bind(meta.forks)
+    .bind(meta.license.as_deref())
+    .bind(meta.topics.join(","))
+    .bind(category)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(db) if db.is_unique_violation() => {
+            AppError::Conflict("this project has already been submitted".into())
+        }
+        other => AppError::from(other),
+    })?;
 
     let id = res.last_insert_rowid();
     let project = fetch_project(&state, id).await?;
