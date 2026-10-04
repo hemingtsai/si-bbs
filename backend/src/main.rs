@@ -1,5 +1,7 @@
 use mimalloc::MiMalloc;
 
+use si_bbs_backend::{config::Config, db, routes::AppState};
+
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
@@ -12,35 +14,16 @@ async fn main() {
         )
         .init();
 
-    let database_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://si-bbs.db?mode=rwc".to_string());
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
+    let cfg = Config::from_env();
+    let pool = db::connect(&cfg.database_url)
         .await
         .expect("connect sqlite");
-    sqlx::query("PRAGMA journal_mode=WAL")
-        .execute(&pool)
-        .await
-        .ok();
-    sqlx::query("PRAGMA synchronous=NORMAL")
-        .execute(&pool)
-        .await
-        .ok();
-    sqlx::query("PRAGMA foreign_keys=ON")
-        .execute(&pool)
-        .await
-        .ok();
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrate");
+    db::migrate(&pool).await.expect("migrate");
 
-    let app = axum::Router::new()
-        .route("/api/health", axum::routing::get(|| async { "ok" }))
-        .layer(tower::limit::ConcurrencyLimitLayer::new(64));
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let app = si_bbs_backend::create_router(AppState { pool, cfg });
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .unwrap();
     tracing::info!("listening on 0.0.0.0:3000");
     axum::serve(listener, app).await.unwrap();
 }
