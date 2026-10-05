@@ -155,7 +155,7 @@ pub async fn purge(
     headers: HeaderMap,
     Path((kind, id)): Path<(String, i64)>,
 ) -> Result<StatusCode, AppError> {
-    require_role(&state.cfg, &headers, &[Role::Admin])?;
+    require_role(&state, &headers, &[Role::Admin]).await?;
     if !KINDS.contains(&kind.as_str()) {
         return Err(AppError::NotFound);
     }

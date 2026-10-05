@@ -3,7 +3,7 @@ use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
 
 use crate::config::Config;
-use crate::handlers::{auth, comment, project, rating, trash, wiki};
+use crate::handlers::{admin, auth, comment, project, rating, trash, wiki};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -50,6 +50,17 @@ pub fn create_router(state: AppState) -> Router {
             "/api/trash/{kind}/{id}",
             axum::routing::delete(trash::purge),
         )
+        // Administration.
+        .route("/api/admin/users", get(admin::list_users))
+        .route(
+            "/api/admin/users/{id}/role",
+            axum::routing::patch(admin::set_role),
+        )
+        .route(
+            "/api/admin/users/{id}/ban",
+            axum::routing::patch(admin::set_ban),
+        )
+        .route("/api/admin/stats", get(admin::stats))
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
         .with_state(state)
 }

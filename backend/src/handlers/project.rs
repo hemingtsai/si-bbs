@@ -237,7 +237,7 @@ pub async fn review(
     Path(id): Path<i64>,
     Json(input): Json<ReviewInput>,
 ) -> Result<Json<ProjectOut>, AppError> {
-    let claims = require_role(&state.cfg, &headers, &[Role::Admin, Role::Moderator])?;
+    let claims = require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
 
     let status = match input.action.trim().to_ascii_lowercase().as_str() {
         "approve" | "approved" => ProjectStatus::Approved,
@@ -284,7 +284,7 @@ pub async fn review_queue(
     headers: HeaderMap,
     Query(q): Query<MineQuery>,
 ) -> Result<Json<Page<ProjectOut>>, AppError> {
-    require_role(&state.cfg, &headers, &[Role::Admin, Role::Moderator])?;
+    require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
     let (page, per_page) = paging(q.page, q.per_page);
 
     let total: i64 = sqlx::query_scalar(
