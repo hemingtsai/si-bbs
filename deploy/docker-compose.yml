@@ -1,0 +1,14 @@
+services:
+  si-bbs:
+    build: ..
+    ports:
+      - "3000:3000"
+    volumes:
+      - si-bbs-data:/data
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    restart: unless-stopped
+
+volumes:
+  si-bbs-data:
