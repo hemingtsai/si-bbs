@@ -1,8 +1,8 @@
 use axum::Router;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
 use tower_http::services::{ServeDir, ServeFile};
-use axum::response::IntoResponse;
 
 use crate::config::Config;
 use crate::handlers::{admin, auth, comment, project, rating, trash, wiki};
@@ -81,7 +81,9 @@ pub fn create_router(state: AppState) -> Router {
                     }
                     match tower::ServiceExt::oneshot(&mut service, req).await {
                         Ok(response) => response.into_response(),
-                        Err(_) => crate::error::AppError::Internal("static file".into()).into_response(),
+                        Err(_) => {
+                            crate::error::AppError::Internal("static file".into()).into_response()
+                        }
                     }
                 }
             });
