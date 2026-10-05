@@ -44,6 +44,7 @@ export function clearSession(): void {
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user_role')
   localStorage.removeItem('user_name')
+  localStorage.removeItem('user_id')
 }
 
 api.interceptors.response.use(

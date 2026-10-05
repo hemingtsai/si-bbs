@@ -14,6 +14,9 @@ const STORAGE = {
 export const useAuthStore = defineStore('auth', () => {
   const role = ref<Role | null>((localStorage.getItem(STORAGE.role) as Role | null) ?? null)
   const username = ref<string | null>(localStorage.getItem(STORAGE.name))
+  const userId = ref<number | null>(
+    localStorage.getItem('user_id') !== null ? Number(localStorage.getItem('user_id')) : null,
+  )
   const accessToken = ref<string | null>(localStorage.getItem(STORAGE.access))
 
   const isAuthenticated = computed(() => accessToken.value !== null)
@@ -35,6 +38,10 @@ export const useAuthStore = defineStore('auth', () => {
     if (tokens.username) {
       username.value = tokens.username
       localStorage.setItem(STORAGE.name, tokens.username)
+    }
+    if (tokens.user_id) {
+      userId.value = tokens.user_id
+      localStorage.setItem('user_id', String(tokens.user_id))
     }
   }
 
@@ -60,14 +67,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   function logout(): void {
     clearSession()
+    localStorage.removeItem('user_id')
     role.value = null
     username.value = null
+    userId.value = null
     accessToken.value = null
   }
 
   return {
     role,
     username,
+    userId,
     accessToken,
     isAuthenticated,
     isStaff,

@@ -13,6 +13,7 @@ vi.mock('../../src/api/axios', () => ({
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('user_role')
     localStorage.removeItem('user_name')
+    localStorage.removeItem('user_id')
   }),
 }))
 
@@ -21,6 +22,7 @@ describe('auth store', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.clearAllMocks()
+    setActivePinia(createPinia())
   })
 
   it('starts logged out', () => {
@@ -99,6 +101,7 @@ describe('auth store', () => {
     localStorage.setItem('refresh_token', 'r')
     localStorage.setItem('user_role', 'user')
     localStorage.setItem('user_name', 'bob')
+    localStorage.setItem('user_id', '3')
     clearSession()
     expect(localStorage.length).toBe(0)
   })
