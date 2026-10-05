@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sonic-rs = "0.3"
 tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6", features = ["compression-br", "compression-gzip", "trace", "cors"] }
+tower-http = { version = "0.6", features = ["compression-br", "compression-gzip", "trace", "cors", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
