@@ -17,6 +17,8 @@ const filters = reactive({
   sort: 'stars' as 'stars' | 'recent' | 'name',
 })
 
+const statusDot = (status: string) => (status === 'approved' ? 'dot dot-ok' : status === 'pending' ? 'dot dot-warn' : 'dot dot-danger')
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -46,86 +48,81 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
-    <h1>项目索引</h1>
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>项目索引</h1>
+        <span class="sub">{{ total }} 个已收项目</span>
+      </div>
+      <div class="page-head-actions">
+        <RouterLink to="/projects/submit" class="btn">提交项目</RouterLink>
+      </div>
+    </div>
 
-    <form class="filters" @submit.prevent="refine">
-      <input v-model="filters.q" type="search" placeholder="搜索名称或描述" />
-      <input v-model="filters.category" type="text" placeholder="分类" />
-      <select v-model="filters.sort" @change="refine">
-        <option value="stars">最多星</option>
-        <option value="recent">最新</option>
-        <option value="name">名称</option>
-      </select>
-      <button type="submit">筛选</button>
-      <RouterLink to="/projects/submit">提交项目</RouterLink>
+    <form class="controls" @submit.prevent="refine">
+      <label class="field">
+        <span class="field-label">搜索</span>
+        <input v-model="filters.q" type="search" placeholder="名称或描述" />
+      </label>
+      <label class="field">
+        <span class="field-label">分类</span>
+        <input v-model="filters.category" type="text" placeholder="例如 dev-tools" />
+      </label>
+      <label class="field">
+        <span class="field-label">排序</span>
+        <select v-model="filters.sort" @change="refine">
+          <option value="stars">最多星</option>
+          <option value="recent">最新</option>
+          <option value="name">名称</option>
+        </select>
+      </label>
+      <div class="field field-actions">
+        <button type="submit" class="btn">筛选</button>
+      </div>
     </form>
 
-    <p v-if="loading">加载中…</p>
+    <p v-if="loading" class="meta">加载中…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="projects.length === 0">还没有通过审核的项目。</p>
+    <p v-else-if="projects.length === 0" class="meta">还没有通过审核的项目。</p>
 
-    <ul v-else class="project-list">
-      <li v-for="project in projects" :key="project.id">
-        <RouterLink :to="{ name: 'project-detail', params: { id: project.id } }">
-          {{ project.name }}
-        </RouterLink>
-        <span class="meta">
-          {{ project.owner }}/{{ project.repo }}
-          <template v-if="project.language"> · {{ project.language }}</template>
-          · ★ {{ project.stars }} · ⑂ {{ project.forks }}
-        </span>
-        <p v-if="project.description" class="description">{{ project.description }}</p>
-        <span v-for="topic in project.topics" :key="topic" class="topic">{{ topic }}</span>
-      </li>
-    </ul>
+    <div v-else class="list">
+      <RouterLink
+        v-for="project in projects"
+        :key="project.id"
+        class="list-row"
+        :to="{ name: 'project-detail', params: { id: project.id } }"
+      >
+        <div class="row-main">
+          <span class="row-title">
+            <span :class="statusDot(project.status)"></span>
+            {{ project.name }}
+          </span>
+          <span class="row-sub">
+            {{ project.owner }}/{{ project.repo }}
+            <template v-if="project.language"> · {{ project.language }}</template>
+            <template v-if="project.description"> · {{ project.description }}</template>
+          </span>
+          <span class="row-sub" v-if="project.topics.length">
+            <span v-for="topic in project.topics" :key="topic" class="tag">{{ topic }}</span>
+          </span>
+        </div>
+        <span class="col-num">★ {{ project.stars }}</span>
+        <span class="col-num">⑂ {{ project.forks }}</span>
+      </RouterLink>
+    </div>
 
     <nav v-if="total > perPage" class="pager">
-      <button :disabled="page <= 1" @click="page--; load()">上一页</button>
-      <span>{{ page }} / {{ Math.ceil(total / perPage) }}</span>
-      <button :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
+      <button class="btn" :disabled="page <= 1" @click="page--; load()">上一页</button>
+      <span class="mono">{{ page }} / {{ Math.ceil(total / perPage) }}</span>
+      <button class="btn" :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
     </nav>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-}
-.error {
-  color: #b00020;
-}
-.project-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.meta {
-  margin-left: 0.5rem;
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
-}
-.description {
-  margin: 0.25rem 0;
-  color: var(--si-muted, #444);
-}
-.topic {
-  display: inline-block;
-  margin-right: 0.4rem;
-  padding: 0 0.5rem;
-  border-radius: 1rem;
-  background: var(--si-border, #eee);
-  font-size: 0.8rem;
-}
-.pager {
-  margin-top: 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
+.field-actions {
+  justify-content: flex-end;
+  flex-direction: row;
+  align-items: flex-end;
 }
 </style>

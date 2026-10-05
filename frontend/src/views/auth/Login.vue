@@ -21,50 +21,54 @@ async function submit(): Promise<void> {
     const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     router.push(target)
   } catch (err: unknown) {
-    error.value = axiosError(err, '登录失败')
+    error.value =
+      (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+      '登录失败'
   } finally {
     busy.value = false
   }
 }
-
-function axiosError(err: unknown, fallback: string): string {
-  const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-  return message ?? fallback
-}
 </script>
 
 <template>
-  <section class="auth">
-    <h1>登录</h1>
-    <form class="auth__form" @submit.prevent="submit">
-      <label>
-        用户名
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>登录</h1>
+        <span class="sub">使用已有账号进入</span>
+      </div>
+    </div>
+
+    <form class="form-stack" @submit.prevent="submit">
+      <label class="field">
+        <span class="field-label">用户名</span>
         <input v-model="username" type="text" required autocomplete="username" />
       </label>
-      <label>
-        密码
+      <label class="field">
+        <span class="field-label">密码</span>
         <input v-model="password" type="password" required autocomplete="current-password" />
       </label>
-      <p v-if="error" class="auth__error">{{ error }}</p>
-      <button type="submit" :disabled="busy">{{ busy ? '登录中…' : '登录' }}</button>
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="row gap">
+        <button class="btn btn-primary" type="submit" :disabled="busy">
+          {{ busy ? '登录中…' : '登录' }}
+        </button>
+        <RouterLink to="/register" class="btn">注册新账号</RouterLink>
+      </div>
     </form>
-    <p>还没有账号？<RouterLink to="/register">注册</RouterLink></p>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.auth__form {
+.form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 12px;
   max-width: 22rem;
 }
-.auth__form label {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-.auth__error {
-  color: #b00020;
+  gap: var(--field-gap);
 }
 </style>

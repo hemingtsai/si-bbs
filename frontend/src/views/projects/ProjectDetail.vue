@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { commentsApi, projectsApi, ratingsApi } from '../../api'
@@ -23,6 +23,8 @@ const ratingComment = ref('')
 const ratingError = ref('')
 const newComment = ref('')
 const commentError = ref('')
+
+const isOwner = computed(() => auth.isAuthenticated && auth.userId === project.value?.submitted_by)
 
 async function load(): Promise<void> {
   loading.value = true
@@ -89,61 +91,62 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-if="loading">加载中…</section>
-  <section v-else-if="error">
+  <div class="page" v-if="loading">加载中…</div>
+  <div class="page" v-else-if="error">
+    <div class="page-head">
+      <div class="title"><h1>出错了</h1></div>
+    </div>
     <p class="error">{{ error }}</p>
-    <RouterLink to="/projects">返回列表</RouterLink>
-  </section>
+    <RouterLink to="/projects" class="btn">返回列表</RouterLink>
+  </div>
 
-  <section v-else-if="project">
-    <header class="project__header">
-      <h1>{{ project.name }}</h1>
-      <a :href="project.github_url" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
-    </header>
-
-    <p v-if="project.description">{{ project.description }}</p>
-
-    <dl class="meta">
-      <dt>语言</dt>
-      <dd>{{ project.language ?? '—' }}</dd>
-      <dt>Star</dt>
-      <dd>{{ project.stars }}</dd>
-      <dt>Fork</dt>
-      <dd>{{ project.forks }}</dd>
-      <dt>License</dt>
-      <dd>{{ project.license ?? '—' }}</dd>
-      <dt>分类</dt>
-      <dd>{{ project.category }}</dd>
-      <dt>状态</dt>
-      <dd>{{ project.status }}</dd>
-    </dl>
-
-    <div class="topics">
-      <span v-for="topic in project.topics" :key="topic" class="topic">{{ topic }}</span>
+  <div class="page" v-else-if="project">
+    <div class="page-head">
+      <div class="title">
+        <h1>{{ project.name }}</h1>
+        <span class="sub">{{ project.owner }}/{{ project.repo }}</span>
+      </div>
+      <div class="page-head-actions">
+        <a class="btn" :href="project.github_url" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <button v-if="isOwner || auth.isStaff" class="btn btn-danger" @click="removeProject">删除</button>
+      </div>
     </div>
 
-    <section class="rating">
-      <h2>评分</h2>
-      <p v-if="summary">平均 {{ summary.average }} / 10（{{ summary.count }} 人）</p>
-      <form v-if="auth.isAuthenticated" class="rating__form" @submit.prevent="submitRating">
-        <label>
-          分数（1–10）
-          <input v-model.number="score" type="number" min="1" max="10" required />
-        </label>
-        <input v-model="ratingComment" type="text" placeholder="一句话评价（可选）" />
-        <button type="submit">打分</button>
-      </form>
-      <p v-else><RouterLink to="/login">登录</RouterLink>后才能评分。</p>
-      <p v-if="ratingError" class="error">{{ ratingError }}</p>
-    </section>
+    <p v-if="project.description" class="section-hint" style="margin-bottom: 16px">{{ project.description }}</p>
 
-    <section class="comments">
-      <h2>评论</h2>
-      <ul class="comments__list">
-        <li v-for="comment in comments" :key="comment.id">
-          <strong>{{ comment.username }}</strong>
-          <span class="comments__time">{{ comment.created_at }}</span>
-          <p>{{ comment.content }}</p>
+    <div class="kv">
+      <div class="kv-row"><span class="kv-key">语言</span><span class="kv-val">{{ project.language ?? '—' }}</span></div>
+      <div class="kv-row"><span class="kv-key">Star / Fork</span><span class="kv-val mono">★ {{ project.stars }} · ⑂ {{ project.forks }}</span></div>
+      <div class="kv-row"><span class="kv-key">License</span><span class="kv-val">{{ project.license ?? '—' }}</span></div>
+      <div class="kv-row"><span class="kv-key">分类</span><span class="kv-val">{{ project.category }}</span></div>
+      <div class="kv-row"><span class="kv-key">状态</span><span class="kv-val"><span class="status" :class="'status-' + project.status">{{ project.status }}</span></span></div>
+      <div class="kv-row"><span class="kv-key">主题</span><span class="kv-val">
+        <span v-for="topic in project.topics" :key="topic" class="tag">{{ topic }}</span>
+      </span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">评分</div>
+      <p class="section-hint">
+        平均 <span class="mono">{{ summary?.average ?? 0 }}</span> / 10（<span class="mono">{{ summary?.count ?? 0 }}</span> 人）
+      </p>
+      <form v-if="auth.isAuthenticated" class="row gap" @submit.prevent="submitRating">
+        <input v-model.number="score" type="number" min="1" max="10" required style="width: 72px" />
+        <input v-model="ratingComment" type="text" placeholder="一句话评价（可选）" class="grow" />
+        <button type="submit" class="btn">打分</button>
+      </form>
+      <p v-else class="meta"><RouterLink to="/login">登录</RouterLink>后才能评分。</p>
+      <p v-if="ratingError" class="error">{{ ratingError }}</p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">评论</div>
+      <div class="list">
+        <div v-for="comment in comments" :key="comment.id" class="list-row" style="cursor: default">
+          <div class="row-main">
+            <span class="row-title">{{ comment.username }}<span class="row-sub" style="margin-left: 8px">{{ comment.created_at }}</span></span>
+            <span class="row-sub">{{ comment.content }}</span>
+          </div>
           <button
             v-if="auth.username === comment.username || auth.isStaff"
             class="linklike"
@@ -151,71 +154,41 @@ onMounted(load)
           >
             删除
           </button>
-        </li>
-        <li v-if="comments.length === 0">还没有评论。</li>
-      </ul>
+        </div>
+        <p v-if="comments.length === 0" class="meta" style="margin: 8px 0">还没有评论。</p>
+      </div>
 
-      <form v-if="auth.isAuthenticated" class="comments__form" @submit.prevent="submitComment">
-        <textarea v-model="newComment" rows="3" placeholder="写下你的看法" maxlength="5000" />
-        <button type="submit">发表</button>
+      <form v-if="auth.isAuthenticated" class="form-stack" style="margin-top: 12px" @submit.prevent="submitComment">
+        <textarea v-model="newComment" rows="3" placeholder="写下你的看法" maxlength="5000"></textarea>
+        <div class="row gap">
+          <button type="submit" class="btn">发表</button>
+        </div>
       </form>
-      <p v-else><RouterLink to="/login">登录</RouterLink>后才能评论。</p>
+      <p v-else class="meta"><RouterLink to="/login">登录</RouterLink>后才能评论。</p>
       <p v-if="commentError" class="error">{{ commentError }}</p>
-    </section>
+    </div>
 
-    <MarkdownView :source="project.readme_raw" />
-
-    <button v-if="auth.isAuthenticated && auth.userId === project.submitted_by" class="danger" @click="removeProject">删除项目</button>
-  </section>
+    <div class="section">
+      <div class="section-title">README</div>
+      <MarkdownView :source="project.readme_raw" />
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.error {
-  color: #b00020;
-}
-.project__header {
-  display: flex;
-  align-items: baseline;
-  gap: 1rem;
-}
-.meta {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0 1rem;
-}
-.topic {
-  display: inline-block;
-  margin-right: 0.4rem;
-  padding: 0 0.5rem;
-  border-radius: 1rem;
-  background: var(--si-border, #eee);
-  font-size: 0.8rem;
-}
-.linklike {
-  border: none;
-  background: none;
-  padding: 0;
-  color: #b00020;
-  cursor: pointer;
-}
-.danger {
-  margin-top: 1rem;
-  color: #b00020;
-}
-.comments__list {
-  list-style: none;
-  padding: 0;
-}
-.comments__time {
-  color: var(--si-muted, #666);
-  font-size: 0.85rem;
-  margin-left: 0.5rem;
-}
-.rating__form,
-.comments__form {
+.form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-width: 32rem;
+  gap: 8px;
+  max-width: 36rem;
+}
+.grow {
+  flex: 1;
+}
+.list-row {
+  cursor: default;
+}
+.list-row:hover {
+  background: none;
 }
 </style>

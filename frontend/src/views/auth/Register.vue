@@ -48,60 +48,53 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <section class="auth">
-    <h1>注册</h1>
-    <form class="auth__form" @submit.prevent="submit">
-      <label>
-        用户名
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>注册</h1>
+        <span class="sub">创建一个新账号</span>
+      </div>
+    </div>
+
+    <form class="form-stack" @submit.prevent="submit">
+      <label class="field">
+        <span class="field-label">用户名</span>
         <input v-model="username" type="text" required autocomplete="username" />
       </label>
-      <label>
-        邮箱
+      <label class="field">
+        <span class="field-label">邮箱</span>
         <input v-model="email" type="email" required autocomplete="email" />
       </label>
-      <label>
-        密码
-        <input
-          v-model="password"
-          type="password"
-          required
-          minlength="6"
-          autocomplete="new-password"
-        />
+      <label class="field">
+        <span class="field-label">密码</span>
+        <input v-model="password" type="password" required minlength="6" autocomplete="new-password" />
       </label>
-      <label>
-        确认密码
-        <input
-          v-model="confirm"
-          type="password"
-          required
-          autocomplete="new-password"
-        />
+      <label class="field">
+        <span class="field-label">确认密码</span>
+        <input v-model="confirm" type="password" required autocomplete="new-password" />
       </label>
-      <p v-if="error" class="auth__error">{{ error }}</p>
-      <p v-if="notice" class="auth__notice">{{ notice }}</p>
-      <button type="submit" :disabled="busy">{{ busy ? '注册中…' : '注册' }}</button>
+      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="notice" class="notice">{{ notice }}</p>
+      <div class="row gap">
+        <button class="btn btn-primary" type="submit" :disabled="busy">
+          {{ busy ? '注册中…' : '注册' }}
+        </button>
+        <RouterLink to="/login" class="btn">去登录</RouterLink>
+      </div>
     </form>
-    <p>已有账号？<RouterLink to="/login">登录</RouterLink></p>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.auth__form {
+.form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 12px;
   max-width: 22rem;
 }
-.auth__form label {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-.auth__error {
-  color: #b00020;
-}
-.auth__notice {
-  color: #2e7d32;
+  gap: var(--field-gap);
 }
 </style>

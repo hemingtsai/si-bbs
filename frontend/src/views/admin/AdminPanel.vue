@@ -60,39 +60,45 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
-    <h1>管理后台</h1>
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>管理后台</h1>
+      </div>
+    </div>
 
-    <dl v-if="stats" class="stats">
-      <dt>用户</dt>
-      <dd>{{ stats.users }}（封禁 {{ stats.users_banned }}）</dd>
-      <dt>项目</dt>
-      <dd>{{ stats.projects_approved }} 已通过 / {{ stats.projects_pending }} 待审核</dd>
-      <dt>Wiki</dt>
-      <dd>{{ stats.wiki_published }} 已发布</dd>
-      <dt>评论</dt>
-      <dd>{{ stats.comments }}</dd>
-      <dt>评分</dt>
-      <dd>{{ stats.ratings }}</dd>
-      <dt>回收站</dt>
-      <dd>{{ stats.trashed }}</dd>
-    </dl>
+    <div v-if="stats" class="kv" style="max-width: 32rem; margin-bottom: 24px">
+      <div class="kv-row"><span class="kv-key">用户</span><span class="kv-val">{{ stats.users }}（封禁 {{ stats.users_banned }}）</span></div>
+      <div class="kv-row"><span class="kv-key">项目</span><span class="kv-val">{{ stats.projects_approved }} 已通过 / {{ stats.projects_pending }} 待审核</span></div>
+      <div class="kv-row"><span class="kv-key">Wiki</span><span class="kv-val">{{ stats.wiki_published }} 已发布</span></div>
+      <div class="kv-row"><span class="kv-key">评论</span><span class="kv-val">{{ stats.comments }}</span></div>
+      <div class="kv-row"><span class="kv-key">评分</span><span class="kv-val">{{ stats.ratings }}</span></div>
+      <div class="kv-row"><span class="kv-key">回收站</span><span class="kv-val">{{ stats.trashed }}</span></div>
+    </div>
 
-    <form class="filters" @submit.prevent="refine">
-      <input v-model="q" type="search" placeholder="搜索用户名或邮箱" />
-      <select v-model="roleFilter" @change="refine">
-        <option value="">全部角色</option>
-        <option value="admin">admin</option>
-        <option value="moderator">moderator</option>
-        <option value="user">user</option>
-      </select>
-      <button type="submit">搜索</button>
+    <form class="controls" @submit.prevent="refine">
+      <label class="field">
+        <span class="field-label">搜索</span>
+        <input v-model="q" type="search" placeholder="用户名或邮箱" />
+      </label>
+      <label class="field">
+        <span class="field-label">角色</span>
+        <select v-model="roleFilter" @change="refine">
+          <option value="">全部</option>
+          <option value="admin">admin</option>
+          <option value="moderator">moderator</option>
+          <option value="user">user</option>
+        </select>
+      </label>
+      <div class="field field-actions">
+        <button type="submit" class="btn">搜索</button>
+      </div>
     </form>
 
-    <p v-if="loading">加载中…</p>
+    <p v-if="loading" class="meta">加载中…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
 
-    <table v-else class="users">
+    <table v-else>
       <thead>
         <tr>
           <th>用户名</th>
@@ -108,58 +114,39 @@ onMounted(load)
           <td>{{ user.username }}</td>
           <td>{{ user.email }}</td>
           <td>
-            <select :value="user.role" @change="setRole(user, ($event.target as HTMLSelectElement).value as Role)">
+            <select
+              :value="user.role"
+              @change="setRole(user, ($event.target as HTMLSelectElement).value as Role)"
+            >
               <option value="admin">admin</option>
               <option value="moderator">moderator</option>
               <option value="user">user</option>
             </select>
           </td>
-          <td>{{ user.banned ? '已封禁' : '正常' }}</td>
-          <td>{{ user.created_at }}</td>
           <td>
-            <button @click="toggleBan(user)">{{ user.banned ? '解封' : '封禁' }}</button>
+            <span v-if="user.banned" class="status status-rejected">已封禁</span>
+            <span v-else class="dot-label"><span class="dot dot-ok"></span>正常</span>
+          </td>
+          <td class="mono">{{ user.created_at }}</td>
+          <td>
+            <button class="btn" @click="toggleBan(user)">{{ user.banned ? '解封' : '封禁' }}</button>
           </td>
         </tr>
       </tbody>
     </table>
 
     <nav v-if="total > perPage" class="pager">
-      <button :disabled="page <= 1" @click="page--; load()">上一页</button>
-      <span>{{ page }} / {{ Math.ceil(total / perPage) }}</span>
-      <button :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
+      <button class="btn" :disabled="page <= 1" @click="page--; load()">上一页</button>
+      <span class="mono">{{ page }} / {{ Math.ceil(total / perPage) }}</span>
+      <button class="btn" :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
     </nav>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.error {
-  color: #b00020;
-}
-.stats {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0 1rem;
-  max-width: 28rem;
-}
-.filters {
-  display: flex;
-  gap: 0.5rem;
-  margin: 1rem 0;
-}
-.users {
-  border-collapse: collapse;
-  width: 100%;
-}
-.users th,
-.users td {
-  border: 1px solid var(--si-border);
-  padding: 0.25rem 0.75rem;
-  text-align: left;
-}
-.pager {
-  margin-top: 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
+.field-actions {
+  justify-content: flex-end;
+  flex-direction: row;
+  align-items: flex-end;
 }
 </style>

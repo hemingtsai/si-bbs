@@ -45,42 +45,28 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-if="loading">加载中…</section>
-  <section v-else-if="error">
+  <div class="page" v-if="loading">加载中…</div>
+  <div class="page" v-else-if="error">
+    <div class="page-head">
+      <div class="title"><h1>出错了</h1></div>
+    </div>
     <p class="error">{{ error }}</p>
-    <RouterLink to="/wiki">返回列表</RouterLink>
-  </section>
+    <RouterLink to="/wiki" class="btn">返回列表</RouterLink>
+  </div>
 
-  <section v-else-if="page">
-    <header class="wiki__header">
-      <h1>{{ page.title }}</h1>
-      <RouterLink v-if="canEdit" :to="{ name: 'wiki-edit', params: { slug: page.slug } }">编辑</RouterLink>
-      <button v-if="canEdit" class="danger" @click="remove">删除</button>
-    </header>
-
-    <p class="meta">
-      {{ page.category }} · {{ page.author_username ?? '未知作者' }} ·
-      {{ page.status === 'draft' ? '草稿' : '已发布' }} · 更新于 {{ page.updated_at }}
-    </p>
+  <div class="page" v-else-if="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>{{ page.title }}</h1>
+        <span class="sub">{{ page.category }} · {{ page.author_username ?? '未知作者' }} · 更新于 {{ page.updated_at }}</span>
+      </div>
+      <div class="page-head-actions">
+        <span class="status" :class="'status-' + page.status">{{ page.status === 'draft' ? '草稿' : '已发布' }}</span>
+        <RouterLink v-if="canEdit" class="btn" :to="{ name: 'wiki-edit', params: { slug: page.slug } }">编辑</RouterLink>
+        <button v-if="canEdit" class="btn btn-danger" @click="remove">删除</button>
+      </div>
+    </div>
 
     <MarkdownView :source="page.content" />
-  </section>
+  </div>
 </template>
-
-<style scoped>
-.error {
-  color: #b00020;
-}
-.wiki__header {
-  display: flex;
-  align-items: baseline;
-  gap: 1rem;
-}
-.meta {
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
-}
-.danger {
-  color: #b00020;
-}
-</style>

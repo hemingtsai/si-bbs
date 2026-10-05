@@ -39,49 +39,39 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
-    <h1>审核队列（{{ total }}）</h1>
-    <p v-if="loading">加载中…</p>
-    <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="pending.length === 0">没有待审核的项目。</p>
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>审核队列</h1>
+        <span class="sub">{{ total }} 个待审核</span>
+      </div>
+    </div>
 
-    <ul v-else class="queue">
-      <li v-for="project in pending" :key="project.id">
-        <strong>{{ project.name }}</strong>
-        <span class="meta">{{ project.owner }}/{{ project.repo }} · {{ project.category }}</span>
-        <p v-if="project.description">{{ project.description }}</p>
-        <div class="actions">
-          <input v-model="note" type="text" placeholder="备注（驳回必填）" />
-          <button @click="review(project, 'approve')">通过</button>
-          <button class="danger" @click="review(project, 'reject')">驳回</button>
+    <p v-if="loading" class="meta">加载中…</p>
+    <p v-else-if="error" class="error">{{ error }}</p>
+    <p v-else-if="pending.length === 0" class="meta">没有待审核的项目。</p>
+
+    <div v-else class="list">
+      <div v-for="project in pending" :key="project.id" class="list-row" style="cursor: default; align-items: flex-start">
+        <div class="row-main">
+          <span class="row-title">
+            <span class="dot dot-warn"></span>{{ project.name }}
+          </span>
+          <span class="row-sub">{{ project.owner }}/{{ project.repo }} · {{ project.category }}</span>
+          <span v-if="project.description" class="row-sub">{{ project.description }}</span>
+          <div class="row gap" style="margin-top: 8px">
+            <input v-model="note" type="text" placeholder="备注（驳回必填）" style="flex: 1; max-width: 16rem" />
+            <button class="btn" @click="review(project, 'approve')">通过</button>
+            <button class="btn btn-danger" @click="review(project, 'reject')">驳回</button>
+          </div>
         </div>
-      </li>
-    </ul>
-  </section>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.error {
-  color: #b00020;
-}
-.queue {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.meta {
-  margin-left: 0.5rem;
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
-}
-.actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-.danger {
-  color: #b00020;
+.list-row:hover {
+  background: none;
 }
 </style>

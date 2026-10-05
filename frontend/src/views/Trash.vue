@@ -53,52 +53,35 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
-    <h1>回收站</h1>
-    <p v-if="loading">加载中…</p>
-    <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="items.length === 0">回收站是空的。</p>
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>回收站</h1>
+        <span class="sub">{{ items.length }} 个已删除条目</span>
+      </div>
+    </div>
 
-    <ul v-else class="trash">
-      <li v-for="item in items" :key="`${item.kind}-${item.id}`">
-        <span class="kind">{{ kindLabels[item.kind] }}</span>
-        <span class="name">{{ item.name ?? `#${item.id}` }}</span>
-        <span class="meta">
-          {{ item.deleted_by_username ?? '未知用户' }} 于 {{ item.deleted_at }} 删除
-        </span>
-        <button @click="restore(item)">恢复</button>
-        <button v-if="auth.isAdmin" class="danger" @click="purge(item)">彻底删除</button>
-      </li>
-    </ul>
-  </section>
+    <p v-if="loading" class="meta">加载中…</p>
+    <p v-else-if="error" class="error">{{ error }}</p>
+    <p v-else-if="items.length === 0" class="meta">回收站是空的。</p>
+
+    <div v-else class="list">
+      <div v-for="item in items" :key="`${item.kind}-${item.id}`" class="list-row" style="cursor: default">
+        <div class="row-main">
+          <span class="row-title">{{ item.name ?? `#${item.id}` }}</span>
+          <span class="row-sub">
+            {{ kindLabels[item.kind] }} · {{ item.deleted_by_username ?? '未知用户' }} 于 {{ item.deleted_at }} 删除
+          </span>
+        </div>
+        <button class="btn" @click="restore(item)">恢复</button>
+        <button v-if="auth.isAdmin" class="btn btn-danger" @click="purge(item)">彻底删除</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.error {
-  color: #b00020;
-}
-.trash {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.trash li {
-  display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
-}
-.kind {
-  font-size: 0.8rem;
-  color: var(--si-muted, #666);
-}
-.meta {
-  color: var(--si-muted, #666);
-  font-size: 0.85rem;
-  margin-right: auto;
-}
-.danger {
-  color: #b00020;
+.list-row:hover {
+  background: none;
 }
 </style>

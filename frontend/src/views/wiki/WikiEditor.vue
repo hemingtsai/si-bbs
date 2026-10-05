@@ -72,51 +72,53 @@ onMounted(() => {
 </script>
 
 <template>
-  <section>
-    <h1>{{ isEdit ? '编辑页面' : '新建页面' }}</h1>
-    <p v-if="loading">加载中…</p>
-    <form v-else class="form" @submit.prevent="submit">
-      <label>
-        标题
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>{{ isEdit ? '编辑页面' : '新建页面' }}</h1>
+      </div>
+    </div>
+
+    <p v-if="loading" class="meta">加载中…</p>
+    <form v-else class="form-stack" @submit.prevent="submit">
+      <label class="field">
+        <span class="field-label">标题</span>
         <input v-model="title" type="text" required maxlength="200" />
       </label>
-      <label>
-        分类
+      <label class="field">
+        <span class="field-label">分类</span>
         <input v-model="category" type="text" required maxlength="40" />
       </label>
-      <label>
-        状态
+      <label class="field">
+        <span class="field-label">状态</span>
         <select v-model="status">
           <option value="draft">草稿</option>
           <option value="published">发布</option>
         </select>
       </label>
-      <label>
-        正文（Markdown）
-        <textarea v-model="content" rows="18" required maxlength="200000"></textarea>
+      <label class="field">
+        <span class="field-label">正文（Markdown）</span>
+        <textarea v-model="content" rows="18" required maxlength="200000" class="mono"></textarea>
       </label>
       <p v-if="error" class="error">{{ error }}</p>
-      <button type="submit" :disabled="busy">{{ busy ? '保存中…' : '保存' }}</button>
+      <div class="row gap">
+        <button type="submit" class="btn btn-primary" :disabled="busy">{{ busy ? '保存中…' : '保存' }}</button>
+        <button type="button" class="btn" @click="router.back()">取消</button>
+      </div>
     </form>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.form {
+.form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 12px;
   max-width: 46rem;
 }
-.form label {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-.error {
-  color: #b00020;
-}
-textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  gap: var(--field-gap);
 }
 </style>

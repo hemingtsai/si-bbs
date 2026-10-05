@@ -43,72 +43,71 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
-    <h1>Wiki 知识库</h1>
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>Wiki</h1>
+        <span class="sub">{{ total }} 篇已发布</span>
+      </div>
+      <div class="page-head-actions">
+        <RouterLink v-if="auth.isAuthenticated" to="/wiki/new" class="btn">新建页面</RouterLink>
+      </div>
+    </div>
 
-    <form class="filters" @submit.prevent="filter">
-      <input v-model="q" type="search" placeholder="搜索标题或正文" />
-      <select v-model="category" @change="filter">
-        <option value="">全部分類</option>
-        <option v-for="c in categories" :key="c.category" :value="c.category">
-          {{ c.category }}（{{ c.count }}）
-        </option>
-      </select>
-      <button type="submit">搜索</button>
-      <RouterLink v-if="auth.isAuthenticated" to="/wiki/new">新建页面</RouterLink>
+    <form class="controls" @submit.prevent="filter">
+      <label class="field">
+        <span class="field-label">搜索</span>
+        <input v-model="q" type="search" placeholder="标题或正文" />
+      </label>
+      <label class="field">
+        <span class="field-label">分类</span>
+        <select v-model="category" @change="filter">
+          <option value="">全部分类</option>
+          <option v-for="c in categories" :key="c.category" :value="c.category">
+            {{ c.category }}（{{ c.count }}）
+          </option>
+        </select>
+      </label>
+      <div class="field field-actions">
+        <button type="submit" class="btn">搜索</button>
+      </div>
     </form>
 
-    <p v-if="loading">加载中…</p>
+    <p v-if="loading" class="meta">加载中…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <p v-else-if="pages.length === 0">没有匹配的页面。</p>
+    <p v-else-if="pages.length === 0" class="meta">没有匹配的页面。</p>
 
-    <ul v-else class="page-list">
-      <li v-for="pageItem in pages" :key="pageItem.id">
-        <RouterLink :to="{ name: 'wiki-detail', params: { slug: pageItem.slug } }">
-          {{ pageItem.title }}
-        </RouterLink>
-        <span class="meta">
-          {{ pageItem.category }} ·
-          {{ pageItem.author_username ?? '未知作者' }} ·
-          {{ pageItem.updated_at }}
-        </span>
-      </li>
-    </ul>
+    <div v-else class="list">
+      <RouterLink
+        v-for="pageItem in pages"
+        :key="pageItem.id"
+        class="list-row"
+        :to="{ name: 'wiki-detail', params: { slug: pageItem.slug } }"
+      >
+        <div class="row-main">
+          <span class="row-title">
+            <span class="dot" :class="pageItem.status === 'published' ? 'dot-ok' : ''"></span>
+            {{ pageItem.title }}
+          </span>
+          <span class="row-sub">
+            {{ pageItem.category }} · {{ pageItem.author_username ?? '未知作者' }} · {{ pageItem.updated_at }}
+          </span>
+        </div>
+      </RouterLink>
+    </div>
 
     <nav v-if="total > perPage" class="pager">
-      <button :disabled="page <= 1" @click="page--; load()">上一页</button>
-      <span>{{ page }} / {{ Math.ceil(total / perPage) }}</span>
-      <button :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
+      <button class="btn" :disabled="page <= 1" @click="page--; load()">上一页</button>
+      <span class="mono">{{ page }} / {{ Math.ceil(total / perPage) }}</span>
+      <button class="btn" :disabled="page * perPage >= total" @click="page++; load()">下一页</button>
     </nav>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-}
-.error {
-  color: #b00020;
-}
-.page-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-.meta {
-  margin-left: 0.5rem;
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
-}
-.pager {
-  margin-top: 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
+.field-actions {
+  justify-content: flex-end;
+  flex-direction: row;
+  align-items: flex-end;
 }
 </style>

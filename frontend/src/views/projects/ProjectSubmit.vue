@@ -32,45 +32,46 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <section>
-    <h1>提交项目</h1>
-    <form class="form" @submit.prevent="submit">
-      <label>
-        GitHub 链接
+  <div class="page">
+    <div class="page-head">
+      <div class="title">
+        <h1>提交项目</h1>
+        <span class="sub">分享你的 GitHub 项目给社区</span>
+      </div>
+    </div>
+
+    <form class="form-stack" @submit.prevent="submit">
+      <label class="field">
+        <span class="field-label">GitHub 链接</span>
         <input v-model="githubUrl" type="url" required placeholder="https://github.com/owner/repo" />
       </label>
-      <label>
-        分类
+      <label class="field">
+        <span class="field-label">分类</span>
         <input v-model="category" type="text" required placeholder="例如 dev-tools" />
       </label>
-      <label>
-        一句话描述（可选，缺省取 GitHub 简介）
+      <label class="field">
+        <span class="field-label">一句话描述（可选，缺省取 GitHub 简介）</span>
         <input v-model="description" type="text" maxlength="200" />
       </label>
       <p v-if="error" class="error">{{ error }}</p>
-      <p class="hint">提交后进入待审核状态，审核通过后才会出现在公开列表。</p>
-      <button type="submit" :disabled="busy">{{ busy ? '提交中…' : '提交' }}</button>
+      <p class="field-hint">提交后进入待审核状态，审核通过后才会出现在公开列表。</p>
+      <div class="row gap">
+        <button type="submit" class="btn btn-primary" :disabled="busy">{{ busy ? '提交中…' : '提交' }}</button>
+      </div>
     </form>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.form {
+.form-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 12px;
   max-width: 32rem;
 }
-.form label {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-.error {
-  color: #b00020;
-}
-.hint {
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
+  gap: var(--field-gap);
 }
 </style>

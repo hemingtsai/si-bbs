@@ -1,72 +1,73 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+type ThemePref = 'system' | 'light' | 'dark'
+const themePref = ref<ThemePref>('system')
+
+function resolveTheme(pref: ThemePref): 'light' | 'dark' {
+  if (pref !== 'system') return pref
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function applyTheme(): void {
+  document.documentElement.dataset.theme = resolveTheme(themePref.value)
+  localStorage.setItem('si-bbs-theme', themePref.value)
+}
+
+function cycleTheme(): void {
+  themePref.value = themePref.value === 'system' ? 'light' : themePref.value === 'light' ? 'dark' : 'system'
+  applyTheme()
+}
+
+onMounted(() => {
+  const stored = localStorage.getItem('si-bbs-theme')
+  if (stored === 'light' || stored === 'dark') themePref.value = stored
+  applyTheme()
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  media.addEventListener('change', applyTheme)
+})
 
 function logout(): void {
   auth.logout()
   router.push({ name: 'home' })
 }
+
+const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themePref.value === 'light' ? '浅色' : '深色')
 </script>
 
 <template>
-  <div class="layout">
-    <header class="layout__header">
-      <RouterLink to="/" class="layout__brand">SI BBS</RouterLink>
-      <nav class="layout__nav">
-        <RouterLink to="/wiki">Wiki</RouterLink>
-        <RouterLink to="/projects">项目</RouterLink>
-        <RouterLink v-if="auth.isStaff" to="/moderation">审核</RouterLink>
-        <RouterLink v-if="auth.isAuthenticated" to="/me">我的</RouterLink>
-        <RouterLink v-if="auth.isAuthenticated" to="/trash">回收站</RouterLink>
-        <RouterLink v-if="auth.isAdmin" to="/admin">管理</RouterLink>
-        <template v-if="auth.isAuthenticated">
-          <span class="layout__user">{{ auth.username }}</span>
-          <button class="layout__action" @click="logout">退出</button>
-        </template>
-        <RouterLink v-else to="/login">登录</RouterLink>
-      </nav>
-    </header>
-    <main class="layout__main">
-      <RouterView />
-    </main>
+  <div class="shell">
+    <aside class="sidebar">
+      <RouterLink to="/" class="sidebar-brand">SI BBS<span class="mono">v0.1</span></RouterLink>
+      <RouterLink to="/wiki" class="nav-item">Wiki</RouterLink>
+      <RouterLink to="/projects" class="nav-item">项目</RouterLink>
+      <RouterLink v-if="auth.isStaff" to="/moderation" class="nav-item">审核</RouterLink>
+      <RouterLink v-if="auth.isAdmin" to="/admin" class="nav-item">管理</RouterLink>
+      <RouterLink v-if="auth.isAuthenticated" to="/me" class="nav-item">我的</RouterLink>
+      <RouterLink v-if="auth.isAuthenticated" to="/trash" class="nav-item">回收站</RouterLink>
+      <RouterLink v-if="!auth.isAuthenticated" to="/login" class="nav-item">登录</RouterLink>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-foot">
+        <span class="user">{{ auth.username ?? '未登录' }}</span>
+        <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
+        <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
+      </div>
+    </aside>
+    <div class="main">
+      <div class="mainbar">
+        <span class="page-title">{{ String(route.name ?? '') }}</span>
+        <div class="mainbar-right"></div>
+      </div>
+      <main class="content">
+        <RouterView />
+      </main>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.layout__header {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--si-border);
-}
-.layout__brand {
-  font-weight: 700;
-  text-decoration: none;
-  color: inherit;
-}
-.layout__nav {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-.layout__user {
-  color: var(--si-muted, #666);
-  font-size: 0.9rem;
-}
-.layout__action {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-}
-.layout__main {
-  padding: 1.25rem;
-}
-</style>
