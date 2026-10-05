@@ -36,6 +36,7 @@ pub struct User {
     #[serde(skip)]
     pub password_hash: String,
     pub role: String,
+    pub banned: i64,
     pub created_at: chrono::NaiveDateTime,
 }
 
@@ -43,4 +44,32 @@ impl User {
     pub fn role_enum(&self) -> Role {
         Role::parse(&self.role).unwrap_or(Role::User)
     }
+
+    pub fn is_banned(&self) -> bool {
+        self.banned != 0
+    }
+}
+
+/// Authoritative privilege state, read straight from the database so that role
+/// changes and bans apply immediately instead of at token expiry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Privileges {
+    pub role: Role,
+    pub banned: bool,
+}
+
+/// `None` when the user no longer exists.
+pub async fn current_privileges(
+    pool: &sqlx::SqlitePool,
+    user_id: i64,
+) -> Result<Option<Privileges>, crate::error::AppError> {
+    let row: Option<(String, i64)> = sqlx::query_as("SELECT role, banned FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(role, banned)| Privileges {
+        // An unrecognised role string must never widen access.
+        role: Role::parse(&role).unwrap_or(Role::User),
+        banned: banned != 0,
+    }))
 }

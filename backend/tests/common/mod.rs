@@ -60,7 +60,7 @@ pub async fn register(server: &TestServer, username: &str) {
             "password": "password123",
         }))
         .await
-        .assert_status_ok();
+        .assert_status(axum::http::StatusCode::CREATED);
 }
 
 /// Log in and return the access token.

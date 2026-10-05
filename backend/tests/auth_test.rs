@@ -11,7 +11,7 @@ async fn register_login_me_refresh_happy_path() {
         .post("/api/auth/register")
         .json(&json!({"username": "alice", "email": "alice@example.com", "password": "secret123"}))
         .await;
-    res.assert_status_ok();
+    res.assert_status(axum::http::StatusCode::CREATED);
 
     // AUTH-01: login -> JWT
     let res = app
@@ -48,7 +48,7 @@ async fn wrong_password_returns_401() {
     app.post("/api/auth/register")
         .json(&json!({"username": "bob", "email": "bob@example.com", "password": "secret123"}))
         .await
-        .assert_status_ok();
+        .assert_status(axum::http::StatusCode::CREATED);
 
     let res = app
         .post("/api/auth/login")
@@ -73,7 +73,7 @@ async fn duplicate_register_returns_409() {
     app.post("/api/auth/register")
         .json(&body)
         .await
-        .assert_status_ok();
+        .assert_status(axum::http::StatusCode::CREATED);
     let res = app.post("/api/auth/register").json(&body).await;
     res.assert_status_conflict();
 }

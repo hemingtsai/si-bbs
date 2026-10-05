@@ -1,11 +1,11 @@
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::middleware::auth::require_auth;
-use crate::models::user::Role;
+use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
 
@@ -19,7 +19,7 @@ pub struct RegisterReq {
 pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterReq>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     if body.username.trim().is_empty() || body.email.trim().is_empty() {
         return Err(AppError::BadRequest("username/email required".into()));
     }
@@ -38,7 +38,10 @@ pub async fn register(
     .execute(&state.pool)
     .await;
     match res {
-        Ok(_) => Ok(Json(serde_json::json!({ "role": "user" }))),
+        Ok(_) => Ok((
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "role": "user" })),
+        )),
         Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
             Err(AppError::Conflict("username or email taken".into()))
         }
@@ -56,14 +59,20 @@ pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginReq>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let row: Option<(i64, String, String, String)> =
-        sqlx::query_as("SELECT id, username, password_hash, role FROM users WHERE username = ?1")
-            .bind(&body.username)
-            .fetch_optional(&state.pool)
-            .await?;
-    let (id, username, hash, role_str) = row.ok_or(AppError::Unauthorized)?;
+    let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
+        "SELECT id, username, password_hash, role, banned FROM users WHERE username = ?1",
+    )
+    .bind(&body.username)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (id, username, hash, role_str, banned) = row.ok_or(AppError::Unauthorized)?;
     if !auth::verify_password(&body.password, &hash) {
         return Err(AppError::Unauthorized);
+    }
+    // Checked after the password so a wrong password still returns 401 rather
+    // than revealing that the account exists but is banned.
+    if banned != 0 {
+        return Err(AppError::Forbidden);
     }
     let role = Role::parse(&role_str).unwrap_or(Role::User);
     let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role)
@@ -72,6 +81,8 @@ pub async fn login(
         "access_token": access,
         "refresh_token": refresh,
         "role": role.as_str(),
+        "user_id": id,
+        "username": username,
     })))
 }
 
@@ -86,8 +97,22 @@ pub async fn refresh(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let claims = auth::verify(&state.cfg, &body.refresh_token, "refresh")
         .map_err(|_| AppError::Unauthorized)?;
-    let role = Role::parse(&claims.role).unwrap_or(Role::User);
-    let (access, refresh) = auth::issue_pair(&state.cfg, claims.sub, &claims.username, role)
+
+    // The role is re-read from the database instead of being copied out of the
+    // refresh token. Without this a demoted admin could keep minting admin
+    // access tokens forever.
+    let privs = current_privileges(&state.pool, claims.sub)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    if privs.banned {
+        return Err(AppError::Forbidden);
+    }
+    let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?1")
+        .bind(claims.sub)
+        .fetch_one(&state.pool)
+        .await?;
+
+    let (access, refresh) = auth::issue_pair(&state.cfg, claims.sub, &username, privs.role)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
         "access_token": access,
@@ -100,9 +125,23 @@ pub async fn me(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let claims = require_auth(&state.cfg, &headers)?;
+
+    // Read the current row: a token minted before a role change or ban must not
+    // report stale privileges.
+    let row: Option<(String, String, i64)> =
+        sqlx::query_as("SELECT username, role, banned FROM users WHERE id = ?1")
+            .bind(claims.sub)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (username, role, banned) = row.ok_or(AppError::Unauthorized)?;
+    if banned != 0 {
+        return Err(AppError::Forbidden);
+    }
+
     Ok(Json(serde_json::json!({
         "id": claims.sub,
-        "username": claims.username,
-        "role": claims.role,
+        "username": username,
+        "role": Role::parse(&role).unwrap_or(Role::User).as_str(),
+        "banned": banned != 0,
     })))
 }
