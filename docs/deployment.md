@@ -60,6 +60,23 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 > 注意：`main.rs` 目前把监听地址写死为 `0.0.0.0:3000`。如果需要用 `PORT`，
 > 把 `Config` 里读 `PORT` 再传给 `TcpListener::bind` 即可（一处改动）。
 
+## 用 Caddy 反向代理 + TLS（推荐，已用于生产）
+
+服务器上的生产环境用 Caddy 2（`apk add caddy caddy-openrc`）：TLS 终止与证书自动
+续签发生在 Caddy，后端只监听 `127.0.0.1:3000`，前端静态文件由 Caddy 直接从
+`/srv/si-bbs/dist` 提供，`/api/*` 反代到后端。样例见 `deploy/Caddyfile`。
+
+```bash
+uv add caddy caddy-openrc      # 或 apk add caddy caddy-openrc
+cp deploy/Caddyfile /etc/caddy/Caddyfile
+caddy fmt --overwrite /etc/caddy/Caddyfile
+rc-service caddy start && rc-update add caddy
+```
+
+后端二进制的启动参数：`BIND_ADDR=127.0.0.1:3000`（这样公网 3000 端口就关闭，只剩
+22/80/443），`STATIC_DIR` 留空让 Caddy 负责静态文件。Nginx 也能起同样作用，
+见下一节。
+
 ## 不用 Docker 直接部署（musl 静态）
 
 ```bash

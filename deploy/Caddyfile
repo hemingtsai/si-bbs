@@ -1,0 +1,20 @@
+{
+	email hemingtsai@hotmail.com
+}
+
+# Production site. The backend binary listens on 127.0.0.1:3000 and handles
+# API + (optionally) static files; Caddy terminates TLS, serves the built SPA
+# from /srv/si-bbs/dist and proxies /api/* to the backend.
+sibbs.cn, www.sibbs.cn {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	handle {
+		root * /srv/si-bbs/dist
+		try_files {path} /index.html
+		file_server
+	}
+}
