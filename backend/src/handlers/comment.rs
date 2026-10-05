@@ -8,6 +8,7 @@ use crate::handlers::project::fetch_public_project;
 use crate::middleware::auth::require_auth;
 use crate::models::comment::{CommentInput, CommentOut};
 use crate::models::page::Page;
+use crate::models::user::Role;
 use crate::routes::AppState;
 
 const MIN_CONTENT_LEN: usize = 1;
@@ -94,6 +95,41 @@ pub async fn list(
         page,
         per_page,
     }))
+}
+
+/// Soft delete a comment. Comment author, moderator or admin only.
+pub async fn delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((project_id, comment_id)): Path<(i64, i64)>,
+) -> Result<StatusCode, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+
+    let author_id: i64 = sqlx::query_scalar(
+        "SELECT user_id FROM comments WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL",
+    )
+    .bind(comment_id)
+    .bind(project_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let staff =
+        Role::parse(&claims.role).is_some_and(|r| matches!(r, Role::Admin | Role::Moderator));
+    if author_id != claims.sub && !staff {
+        return Err(AppError::Forbidden);
+    }
+
+    sqlx::query(
+        "UPDATE comments SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?2 \
+         WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(comment_id)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn fetch_comment(state: &AppState, id: i64) -> Result<CommentOut, AppError> {

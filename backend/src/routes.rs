@@ -3,7 +3,7 @@ use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
 
 use crate::config::Config;
-use crate::handlers::{auth, comment, project, rating, wiki};
+use crate::handlers::{auth, comment, project, rating, trash, wiki};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,13 +28,27 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/projects", get(project::list).post(project::submit))
         .route("/api/projects/mine", get(project::mine))
         .route("/api/projects/review-queue", get(project::review_queue))
-        .route("/api/projects/{id}", get(project::detail))
+        .route(
+            "/api/projects/{id}",
+            get(project::detail).delete(project::delete),
+        )
         .route("/api/projects/{id}/review", post(project::review))
         .route("/api/projects/{id}/rating", post(rating::rate))
         .route("/api/projects/{id}/rating/summary", get(rating::summary))
         .route(
             "/api/projects/{id}/comments",
             get(comment::list).post(comment::create),
+        )
+        .route(
+            "/api/projects/{project_id}/comments/{comment_id}",
+            axum::routing::delete(comment::delete),
+        )
+        // Trash.
+        .route("/api/trash", get(trash::list))
+        .route("/api/trash/{kind}/{id}/restore", post(trash::restore))
+        .route(
+            "/api/trash/{kind}/{id}",
+            axum::routing::delete(trash::purge),
         )
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
         .with_state(state)

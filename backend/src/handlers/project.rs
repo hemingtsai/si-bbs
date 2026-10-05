@@ -311,6 +311,33 @@ pub async fn review_queue(
     }))
 }
 
+/// Soft delete a project. Submitter, moderator or admin only.
+pub async fn delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let project = fetch_project(&state, id).await?;
+
+    let staff =
+        Role::parse(&claims.role).is_some_and(|r| matches!(r, Role::Admin | Role::Moderator));
+    if project.submitted_by != claims.sub && !staff {
+        return Err(AppError::Forbidden);
+    }
+
+    sqlx::query(
+        "UPDATE projects SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?2 \
+         WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn fetch_project(state: &AppState, id: i64) -> Result<Project, AppError> {
     let sql =
         format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1 AND deleted_at IS NULL");
