@@ -67,7 +67,7 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 `/srv/si-bbs/dist` 提供，`/api/*` 反代到后端。样例见 `deploy/Caddyfile`。
 
 ```bash
-uv add caddy caddy-openrc      # 或 apk add caddy caddy-openrc
+apk add caddy caddy-openrc
 cp deploy/Caddyfile /etc/caddy/Caddyfile
 caddy fmt --overwrite /etc/caddy/Caddyfile
 rc-service caddy start && rc-update add caddy
