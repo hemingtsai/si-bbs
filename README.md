@@ -1,5 +1,7 @@
 # SI BBS
 
+[![CI](https://github.com/hemingtsai/si-bbs/actions/workflows/ci.yml/badge.svg)](https://github.com/hemingtsai/si-bbs/actions/workflows/ci.yml)
+
 AI 主题社区论坛。Wiki 知识库 + 软件发布及索引（GitHub 项目收录），三级权限
 （Admin / Moderator / User），软删除 + 回收站，单一二进制部署。
 

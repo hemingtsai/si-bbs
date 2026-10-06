@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the previous run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  backend:
+    name: 后端（clippy + 测试）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      # The GitHub runner image ships Rust; the exact version is pinned by the
+      # Dockerfile for releases, and edition 2024 only needs 1.85+.
+      - name: 工具链版本
+        run: rustc --version && cargo --version
+      - name: clippy（警告即失败）
+        working-directory: backend
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: backend
+        run: cargo test
+
+  frontend:
+    name: 前端（typecheck + 单测 + 构建）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+      - name: npm run check
+        working-directory: frontend
+        run: npm run check
+
+  e2e:
+    name: 端到端（Playwright）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: cargo-e2e-${{ runner.os }}-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: cargo-e2e-${{ runner.os }}-
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+      # The suite starts the backend itself (cargo run, preinstalled Rust); only
+      # the browser is missing. This is also what makes the browser-level tests
+      # possible at all — they cannot run in a sandbox that forbids the
+      # ~/.cache/ms-playwright download.
+      - name: 安装 chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: npm run test:e2e
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: 失败时上传产物
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: frontend/test-results
+          retention-days: 7

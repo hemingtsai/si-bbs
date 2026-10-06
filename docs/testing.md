@@ -76,6 +76,11 @@ curl http://localhost:3000/api/not-exist         # {"error":"not found"}
 
 ## 约定
 
+- CI（`.github/workflows/ci.yml`）跑三件事，与本地命令一致：
+  `cargo clippy --all-targets -- -D warnings` + `cargo test`；
+  `npm run check`（typecheck + 单测 + build）；`npm run test:e2e`
+  （CI 里会 `npx playwright install --with-deps chromium`，所以浏览器级用例
+  在 CI 上是真的会跑的）。
 - 每个集成测试必须在内存库上独立运行，禁止共享状态（`common::test_ctx()`
   每次都新建 pool）。
 - GitHub 调用一律走 `GithubClient::new(&cfg)`，测试里通过 `GITHUB_API_BASE`
