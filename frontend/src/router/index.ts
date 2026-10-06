@@ -33,6 +33,22 @@ export const router = createRouter({
       component: () => import('../views/projects/ProjectDetail.vue'),
     },
     {
+      path: '/forum',
+      name: 'forum',
+      component: () => import('../views/forum/ForumList.vue'),
+    },
+    {
+      path: '/forum/new',
+      name: 'forum-new',
+      component: () => import('../views/forum/ForumNew.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/forum/:id',
+      name: 'forum-detail',
+      component: () => import('../views/forum/ForumDetail.vue'),
+    },
+    {
       path: '/projects/submit',
       name: 'project-submit',
       component: () => import('../views/projects/ProjectSubmit.vue'),

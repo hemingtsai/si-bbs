@@ -48,6 +48,7 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
       <RouterLink to="/" class="sidebar-brand">SI BBS<span class="mono">v0.1</span></RouterLink>
       <RouterLink to="/wiki" class="nav-item">Wiki</RouterLink>
       <RouterLink to="/projects" class="nav-item">项目</RouterLink>
+      <RouterLink to="/forum" class="nav-item">论坛</RouterLink>
       <RouterLink v-if="auth.isStaff" to="/moderation" class="nav-item">审核</RouterLink>
       <RouterLink v-if="auth.isAdmin" to="/admin" class="nav-item">管理</RouterLink>
       <RouterLink v-if="auth.isAuthenticated" to="/me" class="nav-item">我的</RouterLink>
