@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { wikiApi } from '../../api'
 import { apiError } from '../../lib/errors'
+import AttachmentUpload from '../../components/AttachmentUpload.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +25,24 @@ const baseRevision = ref<number | null>(null)
 const comment = ref('')
 const error = ref('')
 const conflict = ref('')
+const contentEl = ref<HTMLTextAreaElement | null>(null)
+
+/// Drop an uploaded attachment's Markdown at the caret, so the writer does not have
+/// to scroll to the end of a long page.
+function insertIntoContent(snippet: string): void {
+  const el = contentEl.value
+  if (!el) {
+    content.value += `\n${snippet}\n`
+    return
+  }
+  const start = el.selectionStart ?? content.value.length
+  const end = el.selectionEnd ?? start
+  content.value = content.value.slice(0, start) + snippet + content.value.slice(end)
+  void nextTick(() => {
+    el.focus()
+    el.selectionStart = el.selectionEnd = start + snippet.length
+  })
+}
 const busy = ref(false)
 const loading = ref(isEdit.value)
 
@@ -139,8 +158,16 @@ onMounted(() => {
       </label>
       <label class="field">
         <span class="field-label">正文（Markdown）</span>
-        <textarea v-model="content" rows="18" required maxlength="200000" class="mono"></textarea>
+        <textarea
+          ref="contentEl"
+          v-model="content"
+          rows="18"
+          required
+          maxlength="200000"
+          class="mono"
+        ></textarea>
       </label>
+      <AttachmentUpload input-id="wiki-attachment" @insert="insertIntoContent" />
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="conflict" class="error">
         {{ conflict }}

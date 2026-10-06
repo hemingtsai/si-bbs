@@ -237,3 +237,53 @@ test('举报按钮提交后给出反馈，且不提供举报自己的内容', as
   await page.getByRole('button', { name: '提交' }).click()
   await expect(page.getByText('你已经举报过这条内容')).toBeVisible()
 })
+
+test('上传附件后能插入正文，图片在帖子里直接显示', async ({ page }) => {
+  const author = `ua2_${RUN}`
+  await registerAndLogin(page, author)
+
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`附件测试帖_${RUN}`)
+  await page.getByLabel('正文').fill('先写一句：')
+
+  // A real 1x1 PNG: the server checks the magic bytes, so a fake file would fail.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/AF/9pQAAAAASUVORK5CYII=',
+    'base64',
+  )
+  await page.getByLabel('附件').setInputFiles({
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: png,
+  })
+  await expect(page.getByText('dot.png')).toBeVisible()
+  await page.getByRole('button', { name: '插入正文' }).click()
+
+  // The Markdown snippet lands in the body, at the caret.
+  const body = page.getByLabel('正文')
+  await expect(body).toHaveValue(/!\[dot\.png\]\(\/api\/attachments\/\d+\)/)
+
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+  // The image is served back and rendered by the post view.
+  await expect(page.locator('.markdown img, article img, .content img').first()).toBeVisible()
+})
+
+test('附件类型与大小受限，错误信息直接回到页面上', async ({ page }) => {
+  const author = `ua3_${RUN}`
+  await registerAndLogin(page, author)
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`非法附件_${RUN}`)
+  await page.getByLabel('正文').fill('正文')
+
+  // HTML dressed up as an image: the server sniffs the bytes and refuses.
+  await page.getByLabel('附件').setInputFiles({
+    name: 'evil.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('<html><script>alert(1)</script></html>'),
+  })
+  // The page shows the server's own explanation (apiError prefers it over the
+  // generic fallback), which is the useful half of the message.
+  await expect(page.getByText(/unsupported file type|上传失败/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '插入正文' })).toHaveCount(0)
+})

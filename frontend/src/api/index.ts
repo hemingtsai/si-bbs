@@ -159,6 +159,26 @@ export const forumApi = {
     api.put<ForumRule>(`/forum/rules/${board}`, payload),
 }
 
+export interface Attachment {
+  id: number
+  filename: string
+  content_type: string
+  size_bytes: number
+  url: string
+  /// Ready to paste into Markdown.
+  markdown: string
+}
+
+export const attachmentApi = {
+  /// Multipart upload. The boundary is set by the browser, so no Content-Type header
+  /// is passed here — doing so would break the request.
+  upload: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<Attachment>('/attachments', form)
+  },
+}
+
 export const reportApi = {
   create: (payload: { target_kind: string; target_id: number; reason: string }) =>
     api.post<{ status: string }>('/reports', payload),

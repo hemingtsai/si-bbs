@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { forumApi } from '../../api'
 import type { ForumBoard } from '../../api/types'
 import { apiError } from '../../lib/errors'
+import AttachmentUpload from '../../components/AttachmentUpload.vue'
 
 const router = useRouter()
 
@@ -13,6 +14,23 @@ const title = ref('')
 const content = ref('')
 const error = ref('')
 const busy = ref(false)
+const contentEl = ref<HTMLTextAreaElement | null>(null)
+
+/// Insert an attachment at the caret instead of appending to the end.
+function insertIntoContent(snippet: string): void {
+  const el = contentEl.value
+  if (!el) {
+    content.value += `\n${snippet}\n`
+    return
+  }
+  const start = el.selectionStart ?? content.value.length
+  const end = el.selectionEnd ?? start
+  content.value = content.value.slice(0, start) + snippet + content.value.slice(end)
+  void nextTick(() => {
+    el.focus()
+    el.selectionStart = el.selectionEnd = start + snippet.length
+  })
+}
 
 async function submit(): Promise<void> {
   error.value = ''
@@ -57,8 +75,9 @@ async function submit(): Promise<void> {
       </label>
       <label class="field">
         <span class="field-label">正文（Markdown）</span>
-        <textarea v-model="content" rows="14" required maxlength="50000" class="mono"></textarea>
+        <textarea ref="contentEl" v-model="content" rows="14" required maxlength="50000" class="mono"></textarea>
       </label>
+      <AttachmentUpload input-id="forum-attachment" @insert="insertIntoContent" />
       <p v-if="error" class="error">{{ error }}</p>
       <div class="row gap">
         <button type="submit" class="btn btn-primary" :disabled="busy">{{ busy ? '发送中…' : '发送' }}</button>
