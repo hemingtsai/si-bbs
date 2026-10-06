@@ -443,3 +443,66 @@ test('搜索页能从侧栏进入，中文子串能搜到并直接跳转', async
   await page.goto('/search?q=%25')
   await expect(page.getByText('没有匹配的结果。')).toBeVisible()
 })
+
+/**
+ * The point of moving the session into cookies: nothing JavaScript can read is a
+ * credential, and a request that does not carry the CSRF header is refused.
+ */
+test('会话只在 httpOnly cookie 里，跨站写请求被 CSRF 层拒绝', async ({ page }) => {
+  const user = `ucs_${RUN}`
+  await registerAndLogin(page, user)
+
+  // 1) No token anywhere JavaScript can reach it.
+  const storage = await page.evaluate(() => Object.keys(localStorage))
+  expect(storage).not.toContain('access_token')
+  expect(storage).not.toContain('refresh_token')
+  const readableCookies = await page.evaluate(() => document.cookie)
+  expect(readableCookies).not.toContain('access_token')
+  expect(readableCookies).not.toContain('refresh_token')
+  // …except the CSRF token, which the client has to read in order to echo it.
+  expect(readableCookies).toContain('csrf_token=')
+
+  // 2) The session survives a full reload, which means it is being re-established
+  //    from the cookie rather than from a cached token.
+  await page.reload()
+  await expect(page.locator('.sidebar')).toContainText(user)
+  await page.goto('/settings')
+  await expect(page.getByRole('heading', { name: '个人设置' })).toBeVisible()
+
+  // 3) A cookie-authenticated write without the header is refused…
+  const withoutHeader = await page.evaluate(async () => {
+    const res = await fetch('/api/forum/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ board: 'life', title: '无 CSRF 头', content: '正文' }),
+    })
+    return { status: res.status, body: await res.json() }
+  })
+  expect(withoutHeader.status).toBe(403)
+  expect(withoutHeader.body.code).toBe('csrf')
+
+  // …and accepted once the client echoes the cookie, which is what the app does for
+  // every unsafe request.
+  const withHeader = await page.evaluate(async () => {
+    const token = document.cookie
+      .split(';')
+      .map((c) => c.trim())
+      .find((c) => c.startsWith('csrf_token='))!
+      .slice('csrf_token='.length)
+    const res = await fetch('/api/forum/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
+      credentials: 'include',
+      body: JSON.stringify({ board: 'life', title: `带 CSRF 头 ${Date.now()}`, content: '正文' }),
+    })
+    return res.status
+  })
+  expect(withHeader).toBe(201)
+
+  // 4) Logging out ends the session server-side: a protected route bounces again.
+  await page.goto('/settings')
+  await page.getByRole('button', { name: '退出' }).click()
+  await page.goto('/settings')
+  await expect(page).toHaveURL(/\/login\?redirect=/)
+})

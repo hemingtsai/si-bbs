@@ -12,15 +12,46 @@ const API_TIMEOUT_MS = 30_000
 /** The refresh call must not outlive the queued 401 retries for long. */
 const REFRESH_TIMEOUT_MS = 10_000
 
+/**
+ * The session lives in httpOnly cookies, so this client never holds a token:
+ * `withCredentials` is what makes the browser send and accept them. It is set on
+ * every request, including the refresh call, which needs the refresh cookie.
+ */
 export const api = axios.create({
   baseURL: '/api',
   timeout: API_TIMEOUT_MS,
+  withCredentials: true,
 })
 
+/** Cookie the server sets so a double-submit check is possible. */
+export const CSRF_COOKIE = 'csrf_token'
+/** Header the server requires on unsafe requests that authenticate with a cookie. */
+export const CSRF_HEADER = 'x-csrf-token'
+
+/** Read one cookie by name. There is nothing secret here: it is the CSRF token. */
+export function readCookie(name: string): string | null {
+  const match = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : null
+}
+
+/**
+ * Unsafe requests are the ones a cross-site page could trigger, so they have to
+ * carry the CSRF header. Reads are left alone.
+ */
+function needsCsrf(method: string | undefined): boolean {
+  const verb = (method ?? 'get').toLowerCase()
+  return !['get', 'head', 'options'].includes(verb)
+}
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  if (needsCsrf(config.method)) {
+    const token = readCookie(CSRF_COOKIE)
+    if (token) {
+      config.headers[CSRF_HEADER] = token
+    }
   }
   return config
 })
@@ -34,7 +65,7 @@ const REFRESH_PATH = '/api/auth/refresh'
  * `/auth/login` — comparing against `/api/auth/login` matched nothing and a
  * failed login went through the refresh flow.
  */
-const AUTH_PATHS = ['/auth/refresh', '/auth/login', '/auth/register']
+const AUTH_PATHS = ['/auth/refresh', '/auth/login', '/auth/register', '/auth/logout']
 
 export function isAuthPath(url: string | undefined): boolean {
   return url !== undefined && AUTH_PATHS.some((path) => url === path || url === `/api${path}`)
@@ -46,59 +77,56 @@ interface RefreshResponse {
 }
 
 /**
- * Store the tokens from a refresh response.
- *
- * The endpoint returns a **rotated pair**. Keeping only the access token capped
- * every session at seven days from the original login, and would break every
- * session outright the moment the server starts invalidating used refresh tokens.
- */
-export function applyRefreshResponse(data: RefreshResponse): string {
-  localStorage.setItem('access_token', data.access_token)
-  if (data.refresh_token) {
-    localStorage.setItem('refresh_token', data.refresh_token)
-  }
-  return data.access_token
-}
-
-/**
  * Shared in-flight refresh so a burst of 401s triggers exactly one refresh call.
+ *
+ * Resolves to `true` when the session was renewed. The tokens themselves stay in
+ * cookies: the browser stores whatever the server set, which is what makes this
+ * work without any JavaScript-visible credential.
  */
-let refreshInFlight: Promise<string | null> | null = null
+let refreshInFlight: Promise<boolean> | null = null
 
-export async function refreshAccessToken(refresh: string): Promise<string | null> {
+export async function refreshAccessToken(): Promise<boolean> {
   try {
-    const { data } = await axios.post<RefreshResponse>(
-      REFRESH_PATH,
-      { refresh_token: refresh },
-      { timeout: REFRESH_TIMEOUT_MS },
-    )
-    return applyRefreshResponse(data)
+    // No body: the refresh cookie is the credential.
+    await axios.post<RefreshResponse>(REFRESH_PATH, {}, { timeout: REFRESH_TIMEOUT_MS, withCredentials: true })
+    return true
   } catch {
-    // Drop the session only if this is still the session we tried to refresh.
-    //
-    // A password change invalidates every token, and the store installs the fresh
-    // pair the server returned. A request that was already in flight with the *old*
-    // token then fails, and its refresh fails too — without this check that stale
-    // failure would wipe the brand-new pair and log the user out of the session
-    // they just created.
-    if (localStorage.getItem('refresh_token') === refresh) {
-      clearSession()
-    }
-    return null
+    return false
   }
 }
 
 /**
- * Remove every persisted credential and tell the store, which would otherwise
- * keep rendering a logged-in header for a session that no longer exists.
+ * Forget the cached identity and tell the store, which would otherwise keep
+ * rendering a logged-in header for a session that no longer exists.
+ *
+ * Only the *cache* is cleared here: the session cookies are the server's to expire,
+ * and a failed refresh means they are already useless.
  */
 export function clearSession(): void {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('user_role')
-  localStorage.removeItem('user_name')
-  localStorage.removeItem('user_id')
+  clearProfileCache()
   announceSessionCleared()
+}
+
+/**
+ * Keys that describe who is signed in, for rendering before the first API call —
+ * plus the token keys an *older* build of this app wrote. A browser that upgrades
+ * still holds those, and leaving a stale credential in reach of any script would
+ * undo the reason for moving the session into cookies.
+ */
+export const PROFILE_KEYS = [
+  'user_role',
+  'user_name',
+  'user_id',
+  'user_display_name',
+  'user_avatar_url',
+  'access_token',
+  'refresh_token',
+] as const
+
+export function clearProfileCache(): void {
+  for (const key of PROFILE_KEYS) {
+    localStorage.removeItem(key)
+  }
 }
 
 api.interceptors.response.use(
@@ -110,20 +138,19 @@ api.interceptors.response.use(
     if (status !== 401 || !original || original._retried || isAuthPath(original.url)) {
       return Promise.reject(error)
     }
-    const staleRefresh = localStorage.getItem('refresh_token')
-    if (!staleRefresh) {
-      return Promise.reject(error)
-    }
 
     original._retried = true
-    refreshInFlight = refreshInFlight ?? refreshAccessToken(staleRefresh)
-    const token = await refreshInFlight
+    refreshInFlight = refreshInFlight ?? refreshAccessToken()
+    const renewed = await refreshInFlight
     refreshInFlight = null
 
-    if (!token) {
+    if (!renewed) {
+      // The refresh cookie is gone or refused: this session is over. Whether the
+      // user just signed in on another tab is not knowable here, and a false
+      // "logged out" is worse than a retry the caller can make.
+      clearSession()
       return Promise.reject(error)
     }
-    original.headers.Authorization = `Bearer ${token}`
     return api.request(original)
   },
 )

@@ -86,10 +86,14 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach((to: RouteLocationNormalized) => {
-  // Tokens are all we can check synchronously; lazy checks hit the API.
-  const authed = localStorage.getItem('access_token') !== null
-  const role = localStorage.getItem('user_role')
+router.beforeEach(async (to: RouteLocationNormalized) => {
+  // The session lives in httpOnly cookies, so there is nothing to read
+  // synchronously: the first navigation of a page load asks the server once, and
+  // every later one reuses that answer.
+  const { useAuthStore } = await import('../stores/auth')
+  const auth = useAuthStore()
+  const authed = await auth.ensureSession()
+  const role = auth.role
 
   if (to.meta.requiresAuth && !authed) {
     return { name: 'login', query: { redirect: to.fullPath } }

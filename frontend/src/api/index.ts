@@ -137,6 +137,8 @@ export const authApi = {
     api.post<AuthTokens>('/auth/password', payload),
   changeEmail: (payload: { password: string; new_email: string }) =>
     api.post<{ email: string }>('/auth/email', payload),
+  /// The server clears the session cookies; the client forgets its cached identity.
+  logout: () => api.post<{ status: string }>('/auth/logout'),
 }
 
 export type { Me }

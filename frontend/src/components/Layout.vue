@@ -35,7 +35,7 @@ onMounted(() => {
 })
 
 function logout(): void {
-  auth.logout()
+  void auth.logout()
   router.push({ name: 'home' })
 }
 

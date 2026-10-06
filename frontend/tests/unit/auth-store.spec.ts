@@ -9,6 +9,11 @@ import { useAuthStore } from '../../src/stores/auth'
 // axios interceptors are involved here.
 vi.mock('../../src/api/axios', () => ({
   api: { post: vi.fn(), get: vi.fn() },
+  clearProfileCache: vi.fn(() => {
+    for (const key of ['user_role', 'user_name', 'user_id', 'user_display_name', 'user_avatar_url']) {
+      localStorage.removeItem(key)
+    }
+  }),
   clearSession: vi.fn(() => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
@@ -33,14 +38,21 @@ describe('auth store', () => {
     expect(store.isAdmin).toBe(false)
   })
 
-  it('persists tokens and role on login', async () => {
+  it('marks the session as known on login and stores no token', async () => {
     vi.mocked(api.post).mockResolvedValue({
+      data: { access_token: 'a1', refresh_token: 'r1', role: 'moderator', user_id: 7, username: 'alice' },
+    })
+    vi.mocked(api.get).mockResolvedValue({
       data: {
-        access_token: 'a1',
-        refresh_token: 'r1',
-        role: 'moderator',
-        user_id: 7,
+        id: 7,
         username: 'alice',
+        display_name: null,
+        email: 'alice@example.com',
+        bio: null,
+        avatar_url: null,
+        role: 'moderator',
+        banned: false,
+        created_at: '2025-01-01 00:00:00',
       },
     })
 
@@ -51,33 +63,64 @@ describe('auth store', () => {
     expect(store.isStaff).toBe(true)
     expect(store.isAdmin).toBe(false)
     expect(store.username).toBe('alice')
-    expect(localStorage.getItem('access_token')).toBe('a1')
-    expect(localStorage.getItem('refresh_token')).toBe('r1')
+    expect(store.role).toBe('moderator')
+    // The whole point of the cookie session: no credential in JavaScript-reachable
+    // storage. Only the identity cache is written.
+    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem('user_role')).toBe('moderator')
   })
 
-  it('treats admin as staff', () => {
-    localStorage.setItem('access_token', 'a1')
+  it('treats admin as staff from the cached role', () => {
     localStorage.setItem('user_role', 'admin')
     const store = useAuthStore()
     expect(store.isAdmin).toBe(true)
     expect(store.isStaff).toBe(true)
+    // The role is a rendering hint only; `isAuthenticated` waits for the server.
+    expect(store.isAuthenticated).toBe(false)
   })
 
-  it('clears everything on logout', async () => {
-    localStorage.setItem('access_token', 'a1')
-    localStorage.setItem('refresh_token', 'r1')
+  it('clears the cached identity on logout and tells the server', async () => {
     localStorage.setItem('user_role', 'admin')
     localStorage.setItem('user_name', 'alice')
+    localStorage.setItem('user_display_name', '爱丽丝')
     setActivePinia(createPinia())
+    const post = vi.mocked(api.post).mockResolvedValue({ data: { status: 'ok' } })
 
     const store = useAuthStore()
-    store.logout()
+    await store.logout()
 
     expect(store.isAuthenticated).toBe(false)
-    expect(localStorage.getItem('access_token')).toBeNull()
-    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(store.username).toBeNull()
     expect(localStorage.getItem('user_role')).toBeNull()
+    expect(localStorage.getItem('user_name')).toBeNull()
+    expect(localStorage.getItem('user_display_name')).toBeNull()
+    // The cookies are the server's to clear, so the request has to happen.
+    expect(post).toHaveBeenCalledWith('/auth/logout')
+  })
+
+  it('still signs out locally when the logout request fails', async () => {
+    localStorage.setItem('user_role', 'admin')
+    setActivePinia(createPinia())
+    vi.mocked(api.post).mockRejectedValue(new Error('offline'))
+
+    const store = useAuthStore()
+    await store.logout()
+
+    expect(store.isAuthenticated).toBe(false)
+    expect(localStorage.getItem('user_role')).toBeNull()
+  })
+
+  it('asks the server once per page load whether a session exists', async () => {
+    setActivePinia(createPinia())
+    const get = vi.mocked(api.get).mockRejectedValue({ response: { status: 401 } })
+
+    const store = useAuthStore()
+    // Two navigations must not mean two round trips.
+    await expect(store.ensureSession()).resolves.toBe(false)
+    await expect(store.ensureSession()).resolves.toBe(false)
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(store.isAuthenticated).toBe(false)
   })
 
   it('overwrites a stale cached role with the server value', async () => {
@@ -104,6 +147,10 @@ describe('auth store', () => {
 
     expect(me.role).toBe('user')
     expect(store.role).toBe('user')
+    // Ownership checks compare ids ("is this comment mine?"), so the id has to be
+    // cached alongside the name. Forgetting it hid every delete/edit control.
+    expect(store.userId).toBe(1)
+    expect(localStorage.getItem('user_id')).toBe('1')
     // The account payload also carries the profile fields, and the shell needs them.
     expect(store.displayName).toBe('爱丽丝')
     expect(store.shownName).toBe('爱丽丝')
@@ -193,23 +240,16 @@ describe('auth store profile handling', () => {
     expect(localStorage.getItem('user_avatar_url')).toBeNull()
   })
 
-  it('stores the fresh token pair a password change returns', async () => {
-    localStorage.setItem('access_token', 'old-access')
+  it('keeps the session usable after a password change, with no token in JS', async () => {
     const { useAuthStore } = await import('../../src/stores/auth')
     api.post = vi.fn().mockResolvedValue({
-      data: {
-        access_token: 'new-access',
-        refresh_token: 'new-refresh',
-        role: 'user',
-        user_id: 4,
-        username: 'dave',
-      },
+      data: { access_token: 'new-access', refresh_token: 'new-refresh', role: 'user', user_id: 4, username: 'dave' },
     })
     const store = useAuthStore()
     await store.changePassword({ current_password: 'a', new_password: 'b' })
-    // Without this the next request would 401: the server killed the old token.
-    expect(store.accessToken).toBe('new-access')
-    expect(localStorage.getItem('access_token')).toBe('new-access')
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+    // The server reissued the cookies in that same response; the client stores
+    // nothing, which is what makes the swap impossible to get wrong.
+    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
   })
 })

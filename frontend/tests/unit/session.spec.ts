@@ -4,9 +4,10 @@ import axios from 'axios'
 
 import {
   api,
-  applyRefreshResponse,
+  clearProfileCache,
   clearSession,
   isAuthPath,
+  readCookie,
   refreshAccessToken,
 } from '../../src/api/axios'
 import { SESSION_CLEARED_EVENT } from '../../src/lib/session'
@@ -35,24 +36,66 @@ describe('clearSession', () => {
   })
 })
 
-describe('applyRefreshResponse', () => {
+describe('clearProfileCache', () => {
   afterEach(() => localStorage.clear())
 
-  it('keeps the rotated refresh token instead of discarding it', () => {
-    localStorage.setItem('access_token', 'old-access')
-    localStorage.setItem('refresh_token', 'old-refresh')
+  it('drops the cached identity but leaves unrelated keys alone', () => {
+    localStorage.setItem('user_role', 'admin')
+    localStorage.setItem('user_name', 'alice')
+    localStorage.setItem('user_id', '1')
+    localStorage.setItem('user_display_name', '爱丽丝')
+    localStorage.setItem('user_avatar_url', 'https://cdn.example/a.png')
+    localStorage.setItem('theme', 'dark')
 
-    const access = applyRefreshResponse({ access_token: 'new-access', refresh_token: 'new-refresh' })
+    clearProfileCache()
 
-    expect(access).toBe('new-access')
-    expect(localStorage.getItem('access_token')).toBe('new-access')
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+    // Nothing here is a credential any more — the session is in cookies — but a
+    // stale name in the header is its own kind of wrong.
+    for (const key of ['user_role', 'user_name', 'user_id', 'user_display_name', 'user_avatar_url']) {
+      expect(localStorage.getItem(key)).toBeNull()
+    }
+    expect(localStorage.getItem('theme')).toBe('dark')
+  })
+})
+
+describe('readCookie', () => {
+  afterEach(() => {
+    document.cookie = 'csrf_token=; Max-Age=0; Path=/'
   })
 
-  it('leaves the stored refresh token alone when the server omits it', () => {
-    localStorage.setItem('refresh_token', 'old-refresh')
-    applyRefreshResponse({ access_token: 'new-access' })
-    expect(localStorage.getItem('refresh_token')).toBe('old-refresh')
+  it('reads the CSRF cookie and nothing else', () => {
+    document.cookie = 'csrf_token=abc123; Path=/'
+    expect(readCookie('csrf_token')).toBe('abc123')
+    expect(readCookie('access_token')).toBeNull()
+  })
+
+  it('does not match a cookie whose name merely ends with the same text', () => {
+    document.cookie = 'not_csrf_token=nope; Path=/'
+    expect(readCookie('csrf_token')).toBeNull()
+  })
+})
+
+describe('refreshAccessToken', () => {
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('reports success without storing anything: the cookie did the work', async () => {
+    // The server rotates the cookies in the response; JavaScript never sees a token.
+    const post = vi
+      .spyOn(axios, 'post')
+      .mockResolvedValue({ data: { access_token: 'new', refresh_token: 'new-r' } })
+
+    await expect(refreshAccessToken()).resolves.toBe(true)
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('reports failure so the caller can drop the session', async () => {
+    vi.spyOn(axios, 'post').mockRejectedValue(new Error('401'))
+    await expect(refreshAccessToken()).resolves.toBe(false)
   })
 })
 
@@ -95,43 +138,3 @@ describe('isAuthPath', () => {
   })
 })
 
-describe('refreshAccessToken', () => {
-  afterEach(() => {
-    localStorage.clear()
-    vi.restoreAllMocks()
-  })
-
-  it('does not wipe a session that replaced the one it failed to refresh', async () => {
-    // The user changed their password: the old pair is dead, the store installed the
-    // new one, and a request that was in flight with the old token now 401s.
-    localStorage.setItem('access_token', 'old-access')
-    localStorage.setItem('refresh_token', 'old-refresh')
-
-    const post = vi.spyOn(axios, 'post').mockImplementation(async () => {
-      // The store swaps in the fresh pair while the refresh is in flight.
-      localStorage.setItem('access_token', 'new-access')
-      localStorage.setItem('refresh_token', 'new-refresh')
-      throw new Error('401')
-    })
-
-    const token = await refreshAccessToken('old-refresh')
-
-    expect(post).toHaveBeenCalledTimes(1)
-    expect(token).toBeNull()
-    // The stale failure must not log the user out of the new session.
-    expect(localStorage.getItem('access_token')).toBe('new-access')
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
-  })
-
-  it('still drops the session when the token it refreshed is the current one', async () => {
-    localStorage.setItem('access_token', 'access')
-    localStorage.setItem('refresh_token', 'refresh')
-    vi.spyOn(axios, 'post').mockRejectedValue(new Error('401'))
-
-    const token = await refreshAccessToken('refresh')
-
-    expect(token).toBeNull()
-    expect(localStorage.getItem('access_token')).toBeNull()
-    expect(localStorage.getItem('refresh_token')).toBeNull()
-  })
-})
