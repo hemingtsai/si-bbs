@@ -208,6 +208,90 @@ pub async fn delete_post(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Toggle a like on a post.
+pub async fn like_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    toggle_like(state, headers, "post", id).await
+}
+
+async fn toggle_like(
+    state: AppState,
+    headers: HeaderMap,
+    kind: &str,
+    id: i64,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let (table, id_col) = match kind {
+        "post" => ("forum_posts", "id"),
+        "comment" => ("forum_comments", "id"),
+        _ => return Err(AppError::NotFound),
+    };
+
+    // Target must exist and be live.
+    let exists: Option<i64> = sqlx::query_scalar(&format!(
+        "SELECT id FROM {table} WHERE {id_col} = ?1 AND deleted_at IS NULL"
+    ))
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let deleted: Option<i64> = sqlx::query_scalar(
+        "DELETE FROM forum_likes WHERE user_id = ?1 AND target_kind = ?2 AND target_id = ?3 RETURNING user_id",
+    )
+    .bind(claims.sub)
+    .bind(kind)
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let liked = if deleted.is_some() {
+        liked_delta(&state, table, id, -1).await?;
+        false
+    } else {
+        sqlx::query(
+            "INSERT OR IGNORE INTO forum_likes (user_id, target_kind, target_id) VALUES (?1, ?2, ?3)",
+        )
+        .bind(claims.sub)
+        .bind(kind)
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+        liked_delta(&state, table, id, 1).await?;
+        true
+    };
+
+    let likes: i64 = sqlx::query_scalar(&format!(
+        "SELECT likes_count FROM {table} WHERE {id_col} = ?1"
+    ))
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({ "liked": liked, "likes_count": likes })))
+}
+
+async fn liked_delta(
+    state: &AppState,
+    table: &str,
+    id: i64,
+    delta: i64,
+) -> Result<(), AppError> {
+    sqlx::query(&format!(
+        "UPDATE {table} SET likes_count = MAX(likes_count + ?2, 0) WHERE id = ?1"
+    ))
+    .bind(id)
+    .bind(delta)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
 async fn fetch_post(state: &AppState, id: i64) -> Result<ForumPostOut, AppError> {
     let sql = format!(
         "{POST_SELECT} WHERE p.id = ?1 AND p.deleted_at IS NULL"
