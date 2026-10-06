@@ -92,6 +92,7 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
             get(wiki::revision_detail),
         )
         .route("/api/wiki/page/{id}/revert/{no}", post(wiki::revert))
+        .route("/api/wiki/page/{id}/diff", get(wiki::diff_revisions))
         .route("/api/projects", get(project::list).post(project::submit))
         .route("/api/projects/mine", get(project::mine))
         .route("/api/projects/review-queue", get(project::review_queue))

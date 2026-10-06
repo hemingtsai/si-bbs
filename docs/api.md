@@ -114,6 +114,7 @@
 | GET | `/api/wiki/page/{id}/revisions?page=&per_page=` | 公开* | 版本历史（倒序，仅元数据与正文长度，不含正文）。草稿仅作者/staff |
 | GET | `/api/wiki/page/{id}/revisions/{no}` | 公开* | 单个版本（含正文） |
 | POST | `/api/wiki/page/{id}/revert/{no}` | 作者/staff | `{base_revision?, comment?}`，把第 `no` 版作为**新版本**追加（不改写历史，因此可以再回滚回来） |
+| GET | `/api/wiki/page/{id}/diff?from=&to=` | 公开* | 两个版本的**逐行差异**。`to` 默认当前版本，因此 `?from=1` 就是"最近一次保存改了什么"。返回 `{from, to, lines:[{kind, text, old_no, new_no}], coarse, added, removed}`；`from == to` 或版本号 <1 返回 400，版本不存在 404 |
 | DELETE | `/api/wiki/page/{id}` | 作者/staff | 软删除 |
 
 ### Wiki 版本与并发
@@ -124,6 +125,10 @@
   编辑器传 `base_revision` 时，落后于当前版本直接 409 并告知双方版本号；
   不传时用读取到的版本兜底，仍能挡住"读到写之间被别人改掉"的竞态。
 - 回滚也是新增版本（注释默认 `revert to revision N`），历史永远线性可追。
+- 差异是逐行的：先剥掉公共前后缀（真实编辑大多集中在中段），再对中段跑 LCS，
+  且 DP 表有上限（1M 格）。超过上限时返回 `coarse: true` 并把中段整体标记为
+  "删除 + 新增"——这是**有意的降级**：结果仍然是忠实的差异，只是粒度变粗，
+  而不是假装精确或让请求卡死。单侧超过 2 万行直接返回 400。
 - 回收站**彻底删除**页面时，`wiki_revisions` 与 `wiki_slug_aliases` 通过
   `ON DELETE CASCADE` 一并清掉（否则 purge 会被外键拒绝）。
 

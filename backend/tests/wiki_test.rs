@@ -773,3 +773,110 @@ async fn purging_a_renamed_page_cleans_up_its_aliases() {
         "cascade must clean both tables"
     );
 }
+
+/// A diff is only useful if it is exact: applying it must reproduce the target.
+#[tokio::test]
+async fn diffing_two_revisions_reports_the_change() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+
+    let id = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "差异页面", "category": "c", "status": "published",
+            "content": "第一行\n第二行\n第三行",
+        }))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "差异页面", "category": "c", "status": "published",
+            "content": "第一行\n改过的第二行\n第三行\n新增的一行",
+        }))
+        .await
+        .assert_status_ok();
+
+    // Default `to` is the current revision, so `?from=1` is "the latest save".
+    let res = server
+        .get(&format!("/api/wiki/page/{id}/diff?from=1"))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["from"], 1);
+    assert_eq!(body["to"], 2);
+    assert_eq!(body["coarse"], false);
+    assert_eq!(body["added"], 2);
+    assert_eq!(body["removed"], 1);
+
+    let lines = body["lines"].as_array().unwrap();
+    // Unchanged lines keep both numbers; the change is marked.
+    assert_eq!(lines[0]["kind"], "same");
+    assert_eq!(lines[0]["text"], "第一行");
+    assert_eq!(
+        (lines[0]["old_no"].as_i64(), lines[0]["new_no"].as_i64()),
+        (Some(1), Some(1))
+    );
+    let removed: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["kind"] == "remove")
+        .map(|l| l["text"].as_str().unwrap())
+        .collect();
+    let added: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["kind"] == "add")
+        .map(|l| l["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(removed, ["第二行"]);
+    assert_eq!(added, ["改过的第二行", "新增的一行"]);
+
+    // Explicit ranges work, identical revisions are refused, and a missing
+    // revision is a 404.
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=1&to=2"))
+        .await
+        .assert_status_ok();
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=2&to=2"))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=1&to=99"))
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=0"))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+/// A draft's history and diffs are as private as the draft itself.
+#[tokio::test]
+async fn diffing_a_draft_requires_the_author() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+    let id = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({"title":"草稿差异","category":"c","content":"a"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=1&to=1"))
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get(&format!("/api/wiki/page/{id}/diff?from=1&to=1"))
+        .add_header("Authorization", auth.clone())
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST); // visible, just a silly range
+}

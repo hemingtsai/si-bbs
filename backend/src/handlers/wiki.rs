@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
+use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::middleware::auth::require_auth;
@@ -681,4 +682,67 @@ pub async fn revert(
 
     let page: WikiPageOut = fetch_page(&state, id).await?.into();
     Ok(Json(page))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DiffQuery {
+    /// Revision to compare from. Required in practice; see the handler.
+    pub from: Option<i64>,
+    /// Revision to compare to; defaults to the page's current revision.
+    pub to: Option<i64>,
+}
+
+/// Diff two revisions of a page. `?from=2` alone means "what changed in the latest
+/// save".
+pub async fn diff_revisions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Query(q): Query<DiffQuery>,
+) -> Result<Json<crate::services::diff::Diff>, AppError> {
+    let page = fetch_page(&state, id).await?;
+    if page.status != WikiStatus::Published.as_str() {
+        let claims = require_auth(&state, &headers).await.ok();
+        let allowed = claims
+            .as_ref()
+            .is_some_and(|c| c.sub == page.author_id || is_staff(&c.role));
+        if !allowed {
+            return Err(AppError::NotFound);
+        }
+    }
+
+    let to = q.to.unwrap_or(page.revision);
+    let from = q.from.unwrap_or(to - 1);
+    if from < 1 || to < 1 {
+        return Err(AppError::BadRequest(
+            "from and to must be revision numbers of at least 1".into(),
+        ));
+    }
+    if from == to {
+        return Err(AppError::BadRequest(
+            "from and to are the same revision".into(),
+        ));
+    }
+
+    let bodies: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT revision_no, content FROM wiki_revisions \
+         WHERE page_id = ?1 AND revision_no IN (?2, ?3)",
+    )
+    .bind(id)
+    .bind(from)
+    .bind(to)
+    .fetch_all(&state.pool)
+    .await?;
+    let body = |rev: i64| {
+        bodies
+            .iter()
+            .find(|(no, _)| *no == rev)
+            .map(|(_, content)| content.clone())
+    };
+    let from_body = body(from).ok_or(AppError::NotFound)?;
+    let to_body = body(to).ok_or(AppError::NotFound)?;
+
+    crate::services::diff::diff(&from_body, &to_body, from, to)
+        .map(Json)
+        .map_err(AppError::BadRequest)
 }
