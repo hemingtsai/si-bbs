@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { hardenLinks, renderMarkdown } from '../../src/lib/markdown'
+import { renderMarkdown } from '../../src/lib/markdown'
 
 describe('renderMarkdown', () => {
   it('renders headings and emphasis', () => {
@@ -56,14 +56,24 @@ describe('renderMarkdown', () => {
   })
 })
 
-describe('hardenLinks', () => {
-  it('adds target and rel to anchors', () => {
-    const out = hardenLinks('<a href="https://example.test">x</a>')
-    expect(out).toContain('target="_blank"')
-    expect(out).toContain('rel="noopener noreferrer"')
+describe('DOMPurify afterSanitizeAttributes hook', () => {
+  it('adds target and rel to anchors produced from Markdown links', () => {
+    const html = renderMarkdown('[click](https://example.test)')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
   })
 
-  it('leaves markup without anchors untouched', () => {
-    expect(hardenLinks('<p>hello</p>')).toBe('<p>hello</p>')
+  it('strips style attributes (tracking beacon / UI spoofing)', () => {
+    const html = renderMarkdown('<p style="position:fixed;inset:0;z-index:99999">x</p>')
+    expect(html).not.toContain('style=')
+  })
+
+  it('does not leave exploitable attribute injection (regression)', () => {
+    const html = renderMarkdown('<img src="broken" alt="<a onerror=alert(1)>">')
+    // The alt text may still literally contain "onerror" — it must NOT become
+    // a live event handler when the browser parses the fragment.
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    expect(doc.querySelector('img')!.getAttribute('onerror')).toBeNull()
+    expect(html).not.toContain('<a target="_blank" rel="noopener noreferrer" onerror=')
   })
 })

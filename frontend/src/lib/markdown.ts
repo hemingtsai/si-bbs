@@ -43,11 +43,18 @@ export function renderMarkdown(source: string | null | undefined): string {
   const raw = marked.parse(source, { async: false }) as string
   return DOMPurify.sanitize(raw, {
     ADD_ATTR: ['target', 'rel'],
+    FORBID_ATTR: ['style'],
     FORBID_TAGS: ['style', 'form', 'input', 'button'],
   })
 }
 
-/** All links open in a new tab and cannot reach back via `window.opener`. */
-export function hardenLinks(html: string): string {
-  return html.replace(/<a\s+/g, '<a target="_blank" rel="noopener noreferrer" ')
-}
+// All links open in a new tab and cannot reach back via `window.opener`.
+// This is a DOMPurify hook — the previous regex-based hardening operated on
+// the *sanitized* string and was exploitable via attribute-value injection
+// (`<img src="broken" alt="<a onerror=...>">`) .
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A') {
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
+  }
+})
