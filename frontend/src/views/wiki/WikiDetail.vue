@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { wikiApi } from '../../api'
 import type { WikiPage } from '../../api/types'
 import MarkdownView from '../../components/MarkdownView.vue'
+import ReportButton from '../../components/ReportButton.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
@@ -66,6 +67,7 @@ onMounted(load)
           历史（第 {{ page.revision }} 版）
         </RouterLink>
         <RouterLink v-if="canEdit" class="btn" :to="{ name: 'wiki-edit', params: { slug: page.slug } }">编辑</RouterLink>
+        <ReportButton target-kind="wiki" :target-id="page.id" :author-id="page.author_id" />
         <button v-if="canEdit" class="btn btn-danger" @click="remove">删除</button>
       </div>
     </div>

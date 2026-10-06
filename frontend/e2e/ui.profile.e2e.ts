@@ -199,3 +199,41 @@ test('陈旧编辑被拒绝并保留输入，而不是静默覆盖', async ({ pa
   await page.goto(`/wiki/conflict-${RUN}`)
   await expect(page.getByText('别人先保存的正文')).toBeVisible()
 })
+
+test('举报按钮提交后给出反馈，且不提供举报自己的内容', async ({ page }) => {
+  const author = `ub_${RUN}`
+  await registerAndLogin(page, author)
+
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`举报测试帖_${RUN}`)
+  await page.getByLabel('正文').fill('这条帖子的正文')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+
+  // One cannot report one's own post, so the button is not offered at all.
+  await expect(page.getByRole('button', { name: '举报' })).toHaveCount(0)
+
+  // A different account sees it and gets feedback for the report.
+  const reporter = `ur2_${RUN}`
+  await page.getByRole('button', { name: '退出' }).click()
+  await registerAndLogin(page, reporter)
+  await page.goto('/forum')
+  await page.getByRole('link', { name: `举报测试帖_${RUN}` }).click()
+
+  await page.getByRole('button', { name: '举报' }).click()
+  await page.getByPlaceholder('举报理由（例如：广告、与主题无关）').fill('测试举报理由')
+  await page.getByRole('button', { name: '提交' }).click()
+  await expect(page.getByText('已提交，版主会尽快处理')).toBeVisible()
+
+  // The report shows up in the reporter's own list on the settings page.
+  await page.goto('/settings')
+  await expect(page.getByText('测试举报理由')).toBeVisible()
+  await expect(page.getByText('待处理')).toBeVisible()
+
+  // Reporting the same thing twice is idempotent, and the UI says so.
+  await page.goBack()
+  await page.getByRole('button', { name: '举报' }).click()
+  await page.getByPlaceholder('举报理由（例如：广告、与主题无关）').fill('又一次')
+  await page.getByRole('button', { name: '提交' }).click()
+  await expect(page.getByText('你已经举报过这条内容')).toBeVisible()
+})

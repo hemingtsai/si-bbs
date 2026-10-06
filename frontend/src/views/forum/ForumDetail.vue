@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { forumApi } from '../../api'
 import type { ForumComment, ForumPost } from '../../api/types'
 import MarkdownView from '../../components/MarkdownView.vue'
+import ReportButton from '../../components/ReportButton.vue'
 import { useAuthStore } from '../../stores/auth'
 import { apiError } from '../../lib/errors'
 
@@ -125,6 +126,7 @@ onMounted(load)
           {{ post.is_featured ? '取消精选' : '设为精选' }}
         </button>
         <button v-if="auth.isStaff || auth.userId === post.author_id" class="btn btn-danger" @click="removePost">删除</button>
+        <ReportButton target-kind="forum_post" :target-id="post.id" :author-id="post.author_id" />
       </div>
     </div>
 
@@ -142,6 +144,12 @@ onMounted(load)
             <span class="row-sub">{{ c.content }}</span>
           </div>
           <button class="linklike" @click="toggleCommentLike(c)">♥ {{ c.likes_count }}</button>
+          <ReportButton
+            target-kind="forum_comment"
+            :target-id="c.id"
+            :author-id="c.author_id"
+            style="margin-left: 8px"
+          />
           <button
             v-if="auth.isStaff || auth.userId === c.author_id"
             class="linklike"

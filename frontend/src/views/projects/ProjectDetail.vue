@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { commentsApi, projectsApi, ratingsApi } from '../../api'
 import type { Comment, Project, RatingSummary } from '../../api/types'
 import MarkdownView from '../../components/MarkdownView.vue'
+import ReportButton from '../../components/ReportButton.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
@@ -113,6 +114,7 @@ onMounted(load)
       <div class="page-head-actions">
         <a class="btn" :href="project.github_url" target="_blank" rel="noopener noreferrer">GitHub</a>
         <button v-if="isOwner || auth.isStaff" class="btn btn-danger" @click="removeProject">删除</button>
+        <ReportButton target-kind="project" :target-id="project.id" />
       </div>
     </div>
 
@@ -163,6 +165,12 @@ onMounted(load)
           >
             删除
           </button>
+          <ReportButton
+            target-kind="comment"
+            :target-id="comment.id"
+            :author-id="comment.user_id"
+            style="margin-left: 8px"
+          />
         </div>
         <p v-if="comments.length === 0" class="meta" style="margin: 8px 0">还没有评论。</p>
       </div>
