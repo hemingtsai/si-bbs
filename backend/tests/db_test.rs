@@ -11,7 +11,7 @@ async fn migrations_apply_cleanly() {
     .unwrap();
     assert_eq!(
         tables,
-        vec!["comments", "projects", "ratings", "users", "wiki_pages"]
+        vec!["comments", "forum_comments", "forum_likes", "forum_posts", "forum_rules", "projects", "ratings", "users", "wiki_pages"]
     );
 }
 
@@ -25,6 +25,8 @@ async fn soft_delete_columns_exist() {
             vec!["deleted_at", "deleted_by", "readme_fetched_at"],
         ),
         ("comments", vec!["deleted_at", "deleted_by"]),
+        ("forum_posts", vec!["deleted_at", "deleted_by"]),
+        ("forum_comments", vec!["deleted_at", "deleted_by"]),
     ] {
         let cols: Vec<String> =
             sqlx::query_scalar(&format!("SELECT name FROM pragma_table_info('{table}')"))

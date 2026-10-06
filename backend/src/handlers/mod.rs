@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod comment;
+pub mod forum;
 pub mod project;
 pub mod rating;
 pub mod trash;

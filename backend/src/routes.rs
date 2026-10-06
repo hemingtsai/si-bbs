@@ -5,7 +5,7 @@ use sqlx::sqlite::SqlitePool;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::config::Config;
-use crate::handlers::{admin, auth, comment, project, rating, trash, wiki};
+use crate::handlers::{admin, auth, comment, forum, project, rating, trash, wiki};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -52,6 +52,8 @@ pub fn create_router(state: AppState) -> Router {
             "/api/trash/{kind}/{id}",
             axum::routing::delete(trash::purge),
         )
+        .route("/api/forum/boards", get(forum::boards))
+        .route("/api/forum/posts", get(forum::list_posts).post(forum::create_post))
         // Administration.
         .route("/api/admin/users", get(admin::list_users))
         .route(
