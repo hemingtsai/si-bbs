@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { api, clearSession } from '../api/axios'
+import { SESSION_CLEARED_EVENT } from '../lib/session'
 import type { AuthTokens, Me, Role } from '../api/types'
 
 const STORAGE = {
@@ -65,13 +66,24 @@ export const useAuthStore = defineStore('auth', () => {
     return data
   }
 
-  function logout(): void {
-    clearSession()
-    localStorage.removeItem('user_id')
+  function reset(): void {
     role.value = null
     username.value = null
     userId.value = null
     accessToken.value = null
+  }
+
+  // The HTTP layer can drop the session behind the store's back: a refresh that
+  // fails while the app is running calls `clearSession()`, which empties
+  // localStorage but knows nothing about these refs. Without this the sidebar
+  // kept showing a user whose every request then 401s.
+  if (typeof window !== 'undefined') {
+    window.addEventListener(SESSION_CLEARED_EVENT, reset)
+  }
+
+  function logout(): void {
+    clearSession()
+    reset()
   }
 
   return {

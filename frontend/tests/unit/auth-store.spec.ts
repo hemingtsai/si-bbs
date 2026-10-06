@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, clearSession } from '../../src/api/axios'
+import { announceSessionCleared } from '../../src/lib/session'
 import { useAuthStore } from '../../src/stores/auth'
 
 // The store is unit-tested against a stubbed API module, so no HTTP layer or
@@ -104,5 +105,25 @@ describe('auth store', () => {
     localStorage.setItem('user_id', '3')
     clearSession()
     expect(localStorage.length).toBe(0)
+  })
+
+  it('drops the in-memory session when the HTTP layer clears it', () => {
+    localStorage.setItem('access_token', 'a1')
+    localStorage.setItem('user_role', 'admin')
+    localStorage.setItem('user_name', 'alice')
+    setActivePinia(createPinia())
+
+    const store = useAuthStore()
+    expect(store.isAdmin).toBe(true)
+
+    // What `clearSession()` does when a refresh fails mid-session: the store
+    // itself is never told, except through this event.
+    announceSessionCleared()
+
+    expect(store.isAuthenticated).toBe(false)
+    expect(store.isAdmin).toBe(false)
+    expect(store.role).toBeNull()
+    expect(store.username).toBeNull()
+    expect(store.userId).toBeNull()
   })
 })

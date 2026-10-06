@@ -1,8 +1,20 @@
 import axios from 'axios'
 
+import { announceSessionCleared } from '../lib/session'
+
+/**
+ * Project submission is the slowest endpoint: the backend calls GitHub twice in
+ * sequence, each with an 8s timeout, so a 15s budget could abort a request the
+ * server then completed anyway — the user saw a failure for a project that had
+ * in fact been created.
+ */
+const API_TIMEOUT_MS = 30_000
+/** The refresh call must not outlive the queued 401 retries for long. */
+const REFRESH_TIMEOUT_MS = 10_000
+
 export const api = axios.create({
   baseURL: '/api',
-  timeout: 15000,
+  timeout: API_TIMEOUT_MS,
 })
 
 api.interceptors.request.use((config) => {
@@ -16,9 +28,40 @@ api.interceptors.request.use((config) => {
 const REFRESH_PATH = '/api/auth/refresh'
 
 /**
- * Shared in-flight refresh so that a burst of 401s triggers exactly one
- * refresh call. Without this, ten parallel requests would each burn the refresh
- * token and invalidate each other's rotated pair.
+ * Paths that must never trigger the refresh-and-retry interceptor.
+ *
+ * `api` is created with `baseURL: '/api'`, so a request records `config.url` as
+ * `/auth/login` — comparing against `/api/auth/login` matched nothing and a
+ * failed login went through the refresh flow.
+ */
+const AUTH_PATHS = ['/auth/refresh', '/auth/login', '/auth/register']
+
+export function isAuthPath(url: string | undefined): boolean {
+  return url !== undefined && AUTH_PATHS.some((path) => url === path || url === `/api${path}`)
+}
+
+interface RefreshResponse {
+  access_token: string
+  refresh_token?: string
+}
+
+/**
+ * Store the tokens from a refresh response.
+ *
+ * The endpoint returns a **rotated pair**. Keeping only the access token capped
+ * every session at seven days from the original login, and would break every
+ * session outright the moment the server starts invalidating used refresh tokens.
+ */
+export function applyRefreshResponse(data: RefreshResponse): string {
+  localStorage.setItem('access_token', data.access_token)
+  if (data.refresh_token) {
+    localStorage.setItem('refresh_token', data.refresh_token)
+  }
+  return data.access_token
+}
+
+/**
+ * Shared in-flight refresh so a burst of 401s triggers exactly one refresh call.
  */
 let refreshInFlight: Promise<string | null> | null = null
 
@@ -27,11 +70,12 @@ async function refreshAccessToken(): Promise<string | null> {
   if (!refresh) return null
 
   try {
-    const { data } = await axios.post<{ access_token: string }>(REFRESH_PATH, {
-      refresh_token: refresh,
-    })
-    localStorage.setItem('access_token', data.access_token)
-    return data.access_token
+    const { data } = await axios.post<RefreshResponse>(
+      REFRESH_PATH,
+      { refresh_token: refresh },
+      { timeout: REFRESH_TIMEOUT_MS },
+    )
+    return applyRefreshResponse(data)
   } catch {
     // The refresh token expired or was revoked: drop the session.
     clearSession()
@@ -39,12 +83,17 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * Remove every persisted credential and tell the store, which would otherwise
+ * keep rendering a logged-in header for a session that no longer exists.
+ */
 export function clearSession(): void {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user_role')
   localStorage.removeItem('user_name')
   localStorage.removeItem('user_id')
+  announceSessionCleared()
 }
 
 api.interceptors.response.use(
@@ -53,12 +102,7 @@ api.interceptors.response.use(
     const original = error.config as (typeof error.config & { _retried?: boolean }) | undefined
     const status = error?.response?.status
 
-    const isAuthRoute =
-      original?.url === REFRESH_PATH ||
-      original?.url === '/api/auth/login' ||
-      original?.url === '/api/auth/register'
-
-    if (status !== 401 || !original || original._retried || isAuthRoute) {
+    if (status !== 401 || !original || original._retried || isAuthPath(original.url)) {
       return Promise.reject(error)
     }
     if (!localStorage.getItem('refresh_token')) {
