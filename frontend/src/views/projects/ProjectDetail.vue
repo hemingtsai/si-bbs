@@ -30,14 +30,18 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [projectRes, summaryRes, commentsRes] = await Promise.all([
-      projectsApi.detail(projectId),
-      ratingsApi.summary(projectId),
-      commentsApi.list(projectId, { per_page: 50 }),
-    ])
+    const projectRes = await projectsApi.detail(projectId)
     project.value = projectRes.data
-    summary.value = summaryRes.data
-    comments.value = commentsRes.data.items
+    // 评分和评论接口对未上架（pending/rejected）项目返回 404，
+    // 因此只有已通过审核的项目才去加载这两块。
+    if (projectRes.data.status === 'approved') {
+      const [summaryRes, commentsRes] = await Promise.all([
+        ratingsApi.summary(projectId),
+        commentsApi.list(projectId, { per_page: 50 }),
+      ])
+      summary.value = summaryRes.data
+      comments.value = commentsRes.data.items
+    }
   } catch {
     error.value = '项目不存在或已下架'
   } finally {
@@ -125,7 +129,12 @@ onMounted(load)
       </span></div>
     </div>
 
-    <div class="section">
+    <p v-if="project.status !== 'approved'" class="meta" style="margin-top: 16px">
+      该项目尚未通过审核，评分和评论在其上架前不可用。当前状态：
+      <span class="status" :class="'status-' + project.status">{{ project.status }}</span>
+    </p>
+
+    <div v-if="project.status === 'approved'" class="section">
       <div class="section-title">评分</div>
       <p class="section-hint">
         平均 <span class="mono">{{ summary?.average ?? 0 }}</span> / 10（<span class="mono">{{ summary?.count ?? 0 }}</span> 人）
@@ -139,7 +148,7 @@ onMounted(load)
       <p v-if="ratingError" class="error">{{ ratingError }}</p>
     </div>
 
-    <div class="section">
+    <div v-if="project.status === 'approved'" class="section">
       <div class="section-title">评论</div>
       <div class="list">
         <div v-for="comment in comments" :key="comment.id" class="list-row" style="cursor: default">
