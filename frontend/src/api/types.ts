@@ -114,3 +114,41 @@ export interface Stats {
   ratings: number
   trashed: number
 }
+export type ForumBoard = 'models' | 'tools' | 'life'
+
+export interface BoardInfo {
+  slug: string
+  post_count: number
+}
+
+export interface ForumPost {
+  id: number
+  board: ForumBoard
+  title: string
+  content: string
+  author_id: number
+  author_username: string | null
+  is_featured: number
+  likes_count: number
+  comments_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ForumComment {
+  id: number
+  post_id: number
+  author_id: number
+  author_username: string | null
+  content: string
+  likes_count: number
+  created_at: string
+}
+
+export interface ForumRule {
+  board: string
+  title: string
+  content: string
+  updated_by: number | null
+  updated_at: string
+}

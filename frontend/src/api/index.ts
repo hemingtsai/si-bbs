@@ -2,6 +2,11 @@ import { api } from './axios'
 import type {
   AdminUser,
   Comment,
+  BoardInfo,
+  ForumBoard,
+  ForumComment,
+  ForumPost,
+  ForumRule,
   Me,
   Page,
   Project,
@@ -93,3 +98,27 @@ export const authApi = {
 }
 
 export type { Me }
+export const forumApi = {
+  boards: () => api.get<BoardInfo[]>('/forum/boards'),
+  list: (params?: { board?: string; q?: string; page?: number; per_page?: number }) =>
+    api.get<Page<ForumPost>>('/forum/posts', { params }),
+  detail: (id: number) => api.get<ForumPost>(`/forum/posts/${id}`),
+  create: (payload: { board: ForumBoard; title: string; content: string }) =>
+    api.post<ForumPost>('/forum/posts', payload),
+  update: (id: number, payload: { board: ForumBoard; title: string; content: string }) =>
+    api.patch<ForumPost>(`/forum/posts/${id}`, payload),
+  remove: (id: number) => api.delete<void>(`/forum/posts/${id}`),
+  like: (id: number) => api.post<{ liked: boolean; likes_count: number }>(`/forum/posts/${id}/like`),
+  setFeatured: (id: number, featured: boolean) =>
+    api.patch<ForumPost>(`/forum/posts/${id}/featured`, { featured }),
+  comments: (id: number, params?: { page?: number }) =>
+    api.get<Page<ForumComment>>(`/forum/posts/${id}/comments`, { params }),
+  createComment: (id: number, content: string) =>
+    api.post<ForumComment>(`/forum/posts/${id}/comments`, { content }),
+  deleteComment: (commentId: number) => api.delete<void>(`/forum/comments/${commentId}`),
+  likeComment: (commentId: number) =>
+    api.post<{ liked: boolean; likes_count: number }>(`/forum/comments/${commentId}/like`),
+  rules: (board?: string) => api.get<ForumRule[]>('/forum/rules', board ? { params: { board } } : undefined),
+  upsertRule: (board: string, payload: { title: string; content: string }) =>
+    api.put<ForumRule>(`/forum/rules/${board}`, payload),
+}
