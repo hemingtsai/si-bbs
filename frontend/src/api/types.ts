@@ -135,6 +135,42 @@ export interface Comment {
   created_at: string
 }
 
+export interface WikiRevision {
+  revision_no: number
+  title: string
+  slug: string
+  category: string
+  status: 'draft' | 'published'
+  author_id: number
+  author_username: string | null
+  comment: string | null
+  created_at: string
+  /// Character count, not bytes: the list deliberately ships no bodies.
+  content_chars: number
+}
+
+export interface WikiRevisionDetail extends Omit<WikiRevision, 'content_chars'> {
+  content: string
+}
+
+export interface DiffLine {
+  kind: 'same' | 'add' | 'remove'
+  text: string
+  old_no: number | null
+  new_no: number | null
+}
+
+export interface WikiDiff {
+  from: number
+  to: number
+  lines: DiffLine[]
+  /// True when the change was too large for an exact diff and was reported as a
+  /// wholesale replacement instead.
+  coarse: boolean
+  added: number
+  removed: number
+}
+
 export interface WikiPage {
   id: number
   title: string

@@ -62,6 +62,9 @@ onMounted(load)
       </div>
       <div class="page-head-actions">
         <span class="status" :class="'status-' + page.status">{{ page.status === 'draft' ? '草稿' : '已发布' }}</span>
+        <RouterLink class="btn" :to="{ name: 'wiki-history', params: { slug: page.slug } }">
+          历史（第 {{ page.revision }} 版）
+        </RouterLink>
         <RouterLink v-if="canEdit" class="btn" :to="{ name: 'wiki-edit', params: { slug: page.slug } }">编辑</RouterLink>
         <button v-if="canEdit" class="btn btn-danger" @click="remove">删除</button>
       </div>

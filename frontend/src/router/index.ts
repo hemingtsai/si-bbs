@@ -11,6 +11,11 @@ export const router = createRouter({
       component: () => import('../views/wiki/WikiDetail.vue'),
     },
     {
+      path: '/wiki/:slug/history',
+      name: 'wiki-history',
+      component: () => import('../views/wiki/WikiHistory.vue'),
+    },
+    {
       path: '/wiki/:slug/edit',
       name: 'wiki-edit',
       component: () => import('../views/wiki/WikiEditor.vue'),

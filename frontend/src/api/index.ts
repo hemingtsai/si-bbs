@@ -7,7 +7,10 @@ import type {
   MyReport,
   ProfileInput,
   ProjectSummary,
+  WikiDiff,
   WikiPageSummary,
+  WikiRevision,
+  WikiRevisionDetail,
   Comment,
   BoardInfo,
   ForumBoard,
@@ -70,10 +73,29 @@ export const wikiApi = {
     category: string
     content: string
     status: 'draft' | 'published'
+    slug?: string
+    comment?: string
   }) => api.post<WikiPage>('/wiki', payload),
+  revisions: (id: number, params?: { page?: number }) =>
+    api.get<Page<WikiRevision>>(`/wiki/page/${id}/revisions`, { params }),
+  revision: (id: number, no: number) =>
+    api.get<WikiRevisionDetail>(`/wiki/page/${id}/revisions/${no}`),
+  diff: (id: number, from: number, to?: number) =>
+    api.get<WikiDiff>(`/wiki/page/${id}/diff`, { params: { from, to } }),
+  revert: (id: number, no: number, payload: { base_revision?: number; comment?: string }) =>
+    api.post<WikiPage>(`/wiki/page/${id}/revert/${no}`, payload),
   update: (
     id: number,
-    payload: { title: string; category: string; content: string; status: 'draft' | 'published' },
+    payload: {
+      title: string
+      category: string
+      content: string
+      status: 'draft' | 'published'
+      slug?: string
+      /// The revision the editor started from; a mismatch is a 409.
+      base_revision?: number
+      comment?: string
+    },
   ) => api.put<WikiPage>(`/wiki/page/${id}`, payload),
   remove: (id: number) => api.delete<void>(`/wiki/page/${id}`),
 }
