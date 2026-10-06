@@ -420,3 +420,134 @@ async fn post_input_validation() {
             .assert_status(axum::http::StatusCode::BAD_REQUEST);
     }
 }
+
+/// Regression: the count used to be a column maintained with `+ 1`/`- 1`. Two
+/// overlapping toggles could both apply the increment while only one like row
+/// existed, so the API reported a number `forum_likes` disagreed with — a drift
+/// that never healed. The count is now derived, so the API cannot lie.
+#[tokio::test]
+async fn concurrent_like_toggles_never_report_a_count_the_table_disagrees_with() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let post_id = create_post(&server, &alice, "life", "race")
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+
+    let like_url = format!("/api/forum/posts/{post_id}/like");
+    let detail_url = format!("/api/forum/posts/{post_id}");
+    let auth = format!("Bearer {alice}");
+
+    // Three overlapping toggles from the same account is the shape that used to
+    // drift: all three can observe "no like row" and then each add its own +1.
+    for round in 0..16 {
+        let (first, second, third) = tokio::join!(
+            server.post(&like_url).add_header("Authorization", auth.clone()),
+            server.post(&like_url).add_header("Authorization", auth.clone()),
+            server.post(&like_url).add_header("Authorization", auth.clone())
+        );
+        first.assert_status_ok();
+        second.assert_status_ok();
+        third.assert_status_ok();
+
+        // Once every request has returned there is no mutation in flight, so the
+        // number the API serves must be exactly the number of rows that exist.
+        // A counter column maintained with +1/-1 failed precisely here, and the
+        // wrong value then stuck around forever.
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let listed = server
+            .get(&detail_url)
+            .await
+            .json::<serde_json::Value>()["likes_count"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(
+            listed, rows,
+            "round {round}: post detail reports {listed} but forum_likes holds {rows}"
+        );
+    }
+
+    // With nothing else in flight a toggle is deterministic: it flips the state,
+    // and both the response and the next read agree on the new value.
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let flipped = 1 - before;
+    let toggled = server
+        .post(&like_url)
+        .add_header("Authorization", auth.clone())
+        .await
+        .json::<serde_json::Value>()["likes_count"]
+        .as_i64()
+        .unwrap();
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let listed = server
+        .get(&detail_url)
+        .await
+        .json::<serde_json::Value>()["likes_count"]
+        .as_i64()
+        .unwrap();
+    assert_eq!((toggled, rows, listed), (flipped, flipped, flipped));
+}
+
+/// Regression: `comments_count` was incremented on create, decremented on soft
+/// delete, and left untouched when a reply was purged from the bin — so the
+/// number a reader saw depended on which of those paths had run.
+#[tokio::test]
+async fn reply_count_is_derived_from_live_replies_only() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let post_id = create_post(&server, &alice, "life", "counting")
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+
+    let mut replies = Vec::new();
+    for content in ["first", "second"] {
+        let id = server
+            .post(&format!("/api/forum/posts/{post_id}/comments"))
+            .add_header("Authorization", format!("Bearer {alice}"))
+            .json(&serde_json::json!({ "content": content }))
+            .await
+            .json::<serde_json::Value>()["id"]
+            .as_i64()
+            .unwrap();
+        replies.push(id);
+    }
+
+    assert_eq!(post_reply_count(&server, post_id).await, 2);
+
+    server
+        .delete(&format!("/api/forum/comments/{}", replies[1]))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    assert_eq!(post_reply_count(&server, post_id).await, 1);
+
+    // Purging the trashed reply must not decrement a second time.
+    server
+        .delete(&format!("/api/trash/forum_comment/{}", replies[1]))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    assert_eq!(post_reply_count(&server, post_id).await, 1);
+}
+
+async fn post_reply_count(server: &TestServer, post_id: i64) -> i64 {
+    server
+        .get(&format!("/api/forum/posts/{post_id}"))
+        .await
+        .json::<serde_json::Value>()["comments_count"]
+        .as_i64()
+        .unwrap()
+}

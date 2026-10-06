@@ -15,10 +15,25 @@ use crate::routes::AppState;
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CONTENT_LEN: usize = 50_000;
 
+/// Like and reply counts are **derived**, never stored: `forum_likes` and
+/// `forum_comments` are the only source of truth. Keeping a counter column in
+/// sync by hand is what let two concurrent toggles drift apart from the rows.
 const POST_SELECT: &str = "SELECT p.id, p.board, p.title, p.content, p.author_id, \
-     u.username AS author_username, p.is_featured, p.likes_count, p.comments_count, \
+     u.username AS author_username, p.is_featured, \
+     (SELECT COUNT(*) FROM forum_likes l \
+      WHERE l.target_kind = 'post' AND l.target_id = p.id) AS likes_count, \
+     (SELECT COUNT(*) FROM forum_comments rc \
+      WHERE rc.post_id = p.id AND rc.deleted_at IS NULL) AS comments_count, \
      p.created_at, p.updated_at \
      FROM forum_posts p LEFT JOIN users u ON u.id = p.author_id";
+
+/// Comment projection with its own derived like count.
+const COMMENT_SELECT: &str = "SELECT c.id, c.post_id, c.author_id, \
+     u.username AS author_username, c.content, \
+     (SELECT COUNT(*) FROM forum_likes l \
+      WHERE l.target_kind = 'comment' AND l.target_id = c.id) AS likes_count, \
+     c.created_at \
+     FROM forum_comments c LEFT JOIN users u ON u.id = c.author_id";
 
 fn is_staff(role: &str) -> bool {
     matches!(Role::parse(role), Some(Role::Admin) | Some(Role::Moderator))
@@ -251,13 +266,11 @@ pub async fn list_comments(
     .fetch_one(&state.pool)
     .await?;
 
-    let rows: Vec<ForumComment> = sqlx::query_as(
-        "SELECT c.id, c.post_id, c.author_id, u.username AS author_username, c.content, \
-         c.likes_count, c.created_at \
-         FROM forum_comments c LEFT JOIN users u ON u.id = c.author_id \
+    let rows: Vec<ForumComment> = sqlx::query_as(&format!(
+        "{COMMENT_SELECT} \
          WHERE c.post_id = ?1 AND c.deleted_at IS NULL ORDER BY c.created_at ASC, c.id ASC \
-         LIMIT ?2 OFFSET ?3",
-    )
+         LIMIT ?2 OFFSET ?3"
+    ))
     .bind(id)
     .bind(per_page)
     .bind((page - 1) * per_page)
@@ -298,19 +311,10 @@ pub async fn create_comment(
             .await?;
     let comment_id = res.last_insert_rowid();
 
-    sqlx::query("UPDATE forum_posts SET comments_count = comments_count + 1 WHERE id = ?1")
-        .bind(id)
-        .execute(&state.pool)
+    let comment: ForumComment = sqlx::query_as(&format!("{COMMENT_SELECT} WHERE c.id = ?1"))
+        .bind(comment_id)
+        .fetch_one(&state.pool)
         .await?;
-
-    let comment: ForumComment = sqlx::query_as(
-        "SELECT c.id, c.post_id, c.author_id, u.username AS author_username, c.content, \
-         c.likes_count, c.created_at \
-         FROM forum_comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = ?1",
-    )
-    .bind(comment_id)
-    .fetch_one(&state.pool)
-    .await?;
     Ok((StatusCode::CREATED, Json(comment)))
 }
 
@@ -327,7 +331,9 @@ pub async fn delete_comment(
     .bind(id)
     .fetch_optional(&state.pool)
     .await?;
-    let (author_id, post_id) = row.ok_or(AppError::NotFound)?;
+    // `post_id` is no longer needed: the post's reply count is derived from the
+    // live rows, so soft-deleting here is enough to change it.
+    let (author_id, _post_id) = row.ok_or(AppError::NotFound)?;
     if author_id != claims.sub && !is_staff(&claims.role) {
         return Err(AppError::Forbidden);
     }
@@ -340,10 +346,6 @@ pub async fn delete_comment(
     .bind(claims.sub)
     .execute(&state.pool)
     .await?;
-    sqlx::query("UPDATE forum_posts SET comments_count = MAX(comments_count - 1, 0) WHERE id = ?1")
-        .bind(post_id)
-        .execute(&state.pool)
-        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -389,8 +391,11 @@ async fn toggle_like(
     .fetch_optional(&state.pool)
     .await?;
 
+    // The toggle is two statements (drop the row if it is there, otherwise add
+    // it). Whichever way the race falls, the answer reported below is counted
+    // straight off `forum_likes`, so the client never sees a number that the
+    // table does not agree with.
     let liked = if deleted.is_some() {
-        liked_delta(&state, table, id, -1).await?;
         false
     } else {
         sqlx::query(
@@ -401,13 +406,13 @@ async fn toggle_like(
         .bind(id)
         .execute(&state.pool)
         .await?;
-        liked_delta(&state, table, id, 1).await?;
         true
     };
 
-    let likes: i64 = sqlx::query_scalar(&format!(
-        "SELECT likes_count FROM {table} WHERE {id_col} = ?1"
-    ))
+    let likes: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM forum_likes WHERE target_kind = ?1 AND target_id = ?2",
+    )
+    .bind(kind)
     .bind(id)
     .fetch_one(&state.pool)
     .await?;
@@ -415,17 +420,6 @@ async fn toggle_like(
     Ok(Json(
         serde_json::json!({ "liked": liked, "likes_count": likes }),
     ))
-}
-
-async fn liked_delta(state: &AppState, table: &str, id: i64, delta: i64) -> Result<(), AppError> {
-    sqlx::query(&format!(
-        "UPDATE {table} SET likes_count = MAX(likes_count + ?2, 0) WHERE id = ?1"
-    ))
-    .bind(id)
-    .bind(delta)
-    .execute(&state.pool)
-    .await?;
-    Ok(())
 }
 
 /// Toggle a like on a comment.
