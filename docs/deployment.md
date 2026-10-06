@@ -55,6 +55,8 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 | `REFRESH_TTL_SECS` | `604800` | refresh token 有效期 |
 | `GITHUB_TOKEN` | 空 | GitHub API 令牌，提高限速（可选但推荐） |
 | `GITHUB_API_BASE` | `https://api.github.com` | 测试/代理时覆盖 |
+| `POW_REQUIRED` | `true` | 注册/发帖/评论/找回密码要求人机验证（工作量证明），登录在被连续猜错 3 次后才要求。**关闭它等于只剩限流**；纯 API 客户端无法解题时可设 `false` |
+| `POW_DIFFICULTY` | `14` | 客户端需要算出的前导零位数。14 位 ≈ 1.6 万次哈希，实测浏览器约 150ms/次发帖、1.7s 完成"注册+登录"整轮；**每加 1 位客户端成本翻倍** |
 | `COOKIE_SECURE` | `false` | 会话 cookie 是否加 `Secure`。**生产走 TLS 时应设为 `true`**；本地 http 保持 `false`，否则浏览器不会回传 cookie |
 | `UPLOAD_DIR` | `./uploads`（镜像内 `/data/uploads`） | 附件落盘目录。**必须与数据库同卷**，否则重建容器会丢文件。进程以 uid 10001 运行，目录必须对它可写；启动时会做一次写探测，不可写会打 ERROR（容器实测踩过：镜像只 chown 了 `/data` 而漏了 `/data/uploads`，上传会 500） |
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单个附件大小上限 |
