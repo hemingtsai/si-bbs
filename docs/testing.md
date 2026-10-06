@@ -45,27 +45,32 @@ npm run test:unit
 
 ```bash
 cd frontend
-npm run test:e2e:install   # 首次：下载 chromium（本机沙箱可能不允许）
+npm run test:e2e:install   # 首次：下载 chromium
 npm run test:e2e
 ```
 
-`playwright.config.ts` 会同时起后端和 Vite preview 服务器，用例在
-`frontend/e2e/*.e2e.ts`，通过真实 HTTP 打到后端。
+`playwright.config.ts` 会同时起后端和 Vite preview 服务器（跑的是 `npm run build:only`
+的产物，不是 dev server），用例在 `frontend/e2e/*.e2e.ts`，分两层：
+
+| 文件 | 层次 | 覆盖 |
+| --- | --- | --- |
+| `forum.e2e.ts` | HTTP 接口 | 免审核发帖/回帖、点赞切换、删帖权限（作者/他人 403/版主 204）、精选排序、板规 |
+| `ui.forum.e2e.ts` | **真实浏览器** | 注册→登录→发帖→点赞→回复→列表计数全链路；未登录访客看不到点赞/回复入口；作者在页面上删帖后列表消失；被提权为版主后刷新才出现审核入口与精选按钮 |
+| `health.e2e.ts` | HTTP 接口 | 探针经 preview 代理可用 |
 
 - **每次运行前重置数据库**：后端启动命令里先跑 `e2e/support/reset-db.mjs`
   删掉 `.playwright/`（已 gitignore）再启动，所以套件可重复执行、不会把测试
   用户和帖子写进开发库。重置**不能**写在 `playwright.config.ts` 顶层——Playwright
   会在每个 worker 进程里重新求值该模块，那样会把运行中的后端正在用的库删掉，
   所有请求立刻开始 500。
-- **账号名带 `Date.now()` 后缀**，断言用相对增量而不是全站总数。
+- **账号名带 `Date.now()` 后缀**，断言用相对增量而不是全站总数；每个用例用
+  自己的账号，不依赖别的用例先跑过。
 - 端口 3000/5173 必须先空闲：配置里 `reuseExistingServer: false`，因为开发实例
   用的是另一个数据库，静默复用它等于往开发者自己的数据里写测试数据。
 - 需要 moderator/admin 的用例用 `e2e/support/db.ts` 的 `promoteUser()` 直接改库
-  （与文档里"建第一个管理员"的方式一致），并且**先登录再提权**——权限必须来自
-  数据库，这也顺带覆盖了"改角色立即生效"。
-- 目前只覆盖 HTTP 接口层，**还没有浏览器级 UI 流程**：本仓库开发环境无法安装
-  chromium（沙箱禁止写 `~/Library/Caches/ms-playwright`），UI 用例需要先
-  `npm run test:e2e:install` 后再补。
+  （与文档里"建第一个管理员"的方式一致），并且**先登录再提权**。注意 UI 层要
+  **刷新页面**才会看到新角色：角色来自 store，store 只在应用启动时用 `fetchMe()`
+  和服务端对齐一次——这条正是 `ui.forum.e2e.ts` 最后一个用例在守的行为。
 
 ## 4. 冒烟测试（curl）
 
