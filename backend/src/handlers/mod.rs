@@ -7,5 +7,6 @@ pub mod forum;
 pub mod project;
 pub mod rating;
 pub mod report;
+pub mod search;
 pub mod trash;
 pub mod wiki;

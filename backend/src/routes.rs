@@ -18,7 +18,7 @@ const COMPRESSION_MIN_BYTES: u16 = 1024;
 
 use crate::config::Config;
 use crate::handlers::{
-    admin, attachment, auth, comment, feed, forum, project, rating, report, trash, wiki,
+    admin, attachment, auth, comment, feed, forum, project, rating, report, search, trash, wiki,
 };
 use crate::services::ratelimit::{self, RateLimiter};
 
@@ -150,6 +150,8 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
             "/api/forum/rules/{board}",
             axum::routing::put(forum::upsert_rule),
         )
+        // Global search.
+        .route("/api/search", get(search::search))
         // Attachments. The body limit is raised for this route only: axum's default
         // is 2MB, and MAX_UPLOAD_BYTES is 5MB plus multipart framing.
         .route(

@@ -4,7 +4,10 @@ mod common;
 async fn migrations_apply_cleanly() {
     let pool = common::test_pool().await;
     let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations' ORDER BY name",
+        // FTS5 keeps its index in shadow tables (`*_fts`, `*_fts_data`, …); those are
+        // an implementation detail of the search index, not part of our schema.
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' \
+         AND name NOT LIKE '%\\_fts%' ESCAPE '\\' AND name != '_sqlx_migrations' ORDER BY name",
     )
     .fetch_all(&pool)
     .await
@@ -152,4 +155,31 @@ async fn trash_view_aggregates_all_kinds() {
         !after.iter().any(|k| k == "comment"),
         "a live comment is still listed in the bin: {after:?}"
     );
+}
+
+/// Search is built on FTS5; if the bundled SQLite ever loses it, migration 022 stops
+/// working and this says so immediately instead of failing at query time.
+#[tokio::test]
+async fn the_bundled_sqlite_has_fts5_with_the_trigram_tokenizer() {
+    let pool = common::test_pool().await;
+    let version: String = sqlx::query_scalar("SELECT sqlite_version()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!version.is_empty());
+    // Trigram is what makes CJK substring search work at all.
+    sqlx::query("CREATE VIRTUAL TABLE fts_probe USING fts5(body, tokenize='trigram')")
+        .execute(&pool)
+        .await
+        .expect("FTS5 with the trigram tokenizer must be available");
+    sqlx::query("INSERT INTO fts_probe (body) VALUES ('这是中文论坛正文')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let hits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM fts_probe WHERE fts_probe MATCH ?1")
+        .bind("\"中文论坛\"")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(hits, 1, "trigram search failed on CJK");
 }
