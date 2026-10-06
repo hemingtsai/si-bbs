@@ -11,7 +11,7 @@ use crate::models::user::Role;
 use crate::routes::AppState;
 
 /// The three soft-deletable entity kinds. `trash_view` unions exactly these.
-const KINDS: [&str; 3] = ["wiki", "project", "comment"];
+const KINDS: [&str; 5] = ["wiki", "project", "comment", "forum_post", "forum_comment"];
 
 /// Map a public kind to its table. Whitelisted so the name can be interpolated
 /// into SQL safely; SQLite cannot bind identifiers.
@@ -20,6 +20,8 @@ fn table_for(kind: &str) -> Result<&'static str, AppError> {
         "wiki" => Ok("wiki_pages"),
         "project" => Ok("projects"),
         "comment" => Ok("comments"),
+        "forum_post" => Ok("forum_posts"),
+        "forum_comment" => Ok("forum_comments"),
         _ => Err(AppError::NotFound),
     }
 }

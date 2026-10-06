@@ -440,7 +440,7 @@ async fn trash_view_only_contains_known_kinds() {
         .unwrap();
     for kind in rows {
         assert!(
-            ["wiki", "project", "comment"].contains(&kind.as_str()),
+            ["wiki", "project", "comment", "forum_post", "forum_comment"].contains(&kind.as_str()),
             "unexpected kind {kind}"
         );
     }
