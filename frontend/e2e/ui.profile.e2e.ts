@@ -1,5 +1,7 @@
 import { expect, request, test, type Page } from '@playwright/test'
 
+import { promoteUser } from './support/db'
+
 /**
  * Browser-level coverage of the account self-service page.
  *
@@ -286,4 +288,55 @@ test('附件类型与大小受限，错误信息直接回到页面上', async ({
   // generic fallback), which is the useful half of the message.
   await expect(page.getByText(/unsupported file type|上传失败/)).toBeVisible()
   await expect(page.getByRole('button', { name: '插入正文' })).toHaveCount(0)
+})
+
+test('版主能在页面上处理举报，管理员能在页面上看到审计日志', async ({ page }) => {
+  const author = `um_${RUN}`
+  await registerAndLogin(page, author)
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`被举报帖_${RUN}`)
+  await page.getByLabel('正文').fill('需要版主看看的内容')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+
+  // A second account files the report.
+  const reporter = `umr_${RUN}`
+  await page.getByRole('button', { name: '退出' }).click()
+  await registerAndLogin(page, reporter)
+  await page.goto('/forum')
+  await page.getByRole('link', { name: `被举报帖_${RUN}` }).click()
+  await page.getByRole('button', { name: '举报' }).click()
+  await page.getByPlaceholder('举报理由（例如：广告、与主题无关）').fill('疑似广告')
+  await page.getByRole('button', { name: '提交' }).click()
+  await expect(page.getByText('已提交，版主会尽快处理')).toBeVisible()
+
+  // The moderator works the queue in the browser.
+  const staff = `ums_${RUN}`
+  await page.getByRole('button', { name: '退出' }).click()
+  await registerAndLogin(page, staff)
+  promoteUser(staff, 'moderator')
+  await page.reload()
+  await page.getByRole('link', { name: '审核' }).click()
+  await page.getByRole('button', { name: '举报队列' }).click()
+  await expect(page.getByText(`论坛帖子：被举报帖_${RUN}`)).toBeVisible()
+  await expect(page.getByText('理由：疑似广告')).toBeVisible()
+
+  // Scope every action to *this* row: the queue is shared with the other tests in
+  // this file, so a bare button locator would match their reports too.
+  const row = page.locator('.list-row', { hasText: `被举报帖_${RUN}` })
+  await page.getByLabel('处理说明（可选）').fill('已确认是广告')
+  await row.getByRole('button', { name: '标记已处理' }).click()
+  // Resolved reports leave the default (unresolved) view.
+  await expect(row).toHaveCount(0)
+
+  // …and the decision is in the audit log, which only the admin can read.
+  const admin = `uma_${RUN}`
+  await page.getByRole('button', { name: '退出' }).click()
+  await registerAndLogin(page, admin)
+  promoteUser(admin, 'admin')
+  await page.reload()
+  await page.getByRole('link', { name: '管理' }).click()
+  await page.getByLabel('动作').selectOption('report.resolve')
+  await expect(page.getByText('report.resolve')).toBeVisible()
+  await expect(page.getByText('已确认是广告')).toBeVisible()
 })

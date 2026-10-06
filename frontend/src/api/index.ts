@@ -1,6 +1,8 @@
 import { api } from './axios'
 import type {
+  AdminReport,
   AdminUser,
+  AuditEntry,
   AuthTokens,
   ForumPostSummary,
   Me,
@@ -115,6 +117,9 @@ export const adminApi = {
   setBan: (id: number, banned: boolean) =>
     api.patch<AdminUser>(`/admin/users/${id}/ban`, { banned }),
   stats: () => api.get<Stats>('/admin/stats'),
+  /// The audit log: who did what to which row.
+  audit: (params?: { action?: string; page?: number; per_page?: number }) =>
+    api.get<Page<AuditEntry>>('/admin/audit', { params }),
 }
 
 export const authApi = {
@@ -184,4 +189,9 @@ export const reportApi = {
     api.post<{ status: string }>('/reports', payload),
   /// The caller's own reports and what happened to them.
   mine: (params?: { page?: number }) => api.get<Page<MyReport>>('/reports/mine', { params }),
+  /// The moderator queue. Defaults to unresolved reports, oldest first.
+  queue: (params?: { status?: 'open' | 'all' | 'resolved' | 'dismissed'; kind?: string; page?: number }) =>
+    api.get<Page<AdminReport>>('/reports', { params }),
+  resolve: (id: number, payload: { status: 'resolved' | 'dismissed'; note?: string }) =>
+    api.patch<AdminReport>(`/reports/${id}`, payload),
 }

@@ -199,13 +199,20 @@ pub async fn resolve(
         };
     }
 
+    // The decision *and* the reason for it: "resolved" alone does not tell a later
+    // reader why, and the note is the substance of the decision. Bounded so a long
+    // note cannot bloat the log.
+    let detail = match note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(note) => format!("{status}: {}", note.chars().take(200).collect::<String>()),
+        None => status.to_string(),
+    };
     audit::record_best_effort(
         &state.pool,
         claims.sub,
         audit::REPORT_RESOLVE,
         "report",
         Some(id),
-        Some(status),
+        Some(&detail),
     )
     .await;
 

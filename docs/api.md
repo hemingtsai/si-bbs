@@ -237,7 +237,7 @@ SMTP 配置、也没有引入邮件依赖）。因此当前行为是：把形如
 | --- | --- | --- | --- |
 | POST | `/api/reports` | 登录 | `{target_kind, target_id, reason}`；`target_kind` ∈ `forum_post`/`forum_comment`/`wiki`/`project`/`comment`，`reason` ≤500 字；每小时 20 条上限，超限 429 |
 | GET | `/api/reports?status=&kind=&page=&per_page=` | mod+ | 队列，默认只列 `status=open`（`all` 可查全部），按时间正序（先到先处理）。返回 `target_title`（帖子标题 / 评论摘要）与 `target_deleted`，无需二次请求 |
-| PATCH | `/api/reports/{id}` | mod+ | `{status: "resolved"\|"dismissed", note?}`；已处理的再改返回 409，非法值 400；动作写入审计日志 |
+| PATCH | `/api/reports/{id}` | mod+ | `{status: "resolved"\|"dismissed", note?}`；已处理的再改返回 409，非法值 400；动作写入审计日志，`detail` 记为 `resolved: <处理说明>`（只记状态的话，后来的人看不出为什么这么处理） |
 | GET | `/api/reports/mine` | 登录 | 我提交过的举报及处理结果 |
 
 **闭环**：如果版主直接删除了被举报的内容，该目标的未处理举报会被自动置为

@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 
 import { adminApi } from '../../api'
-import type { AdminUser, Role, Stats } from '../../api/types'
+import type { AdminUser, AuditEntry, Role, Stats } from '../../api/types'
 import { apiError } from '../../lib/errors'
 
 const users = ref<AdminUser[]>([])
@@ -14,6 +14,10 @@ const roleFilter = ref<Role | ''>('')
 const stats = ref<Stats | null>(null)
 const error = ref('')
 const loading = ref(true)
+const audit = ref<AuditEntry[]>([])
+const auditTotal = ref(0)
+const auditAction = ref('')
+const auditError = ref('')
 
 async function load(): Promise<void> {
   loading.value = true
@@ -56,7 +60,26 @@ function refine(): void {
   load()
 }
 
-onMounted(load)
+/// The audit log answers "who changed this" after the fact, so it is read-only and
+/// filterable by action.
+async function loadAudit(): Promise<void> {
+  auditError.value = ''
+  try {
+    const { data } = await adminApi.audit({
+      action: auditAction.value || undefined,
+      per_page: 50,
+    })
+    audit.value = data.items
+    auditTotal.value = data.total
+  } catch (err: unknown) {
+    auditError.value = apiError(err, '无法加载审计日志')
+  }
+}
+
+onMounted(async () => {
+  await load()
+  await loadAudit()
+})
 </script>
 
 <template>
@@ -134,6 +157,49 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+
+    <section class="section">
+      <div class="section-title">审计日志（{{ auditTotal }}）</div>
+      <div class="controls">
+        <label class="field">
+          <span class="field-label">动作</span>
+          <select v-model="auditAction" @change="loadAudit">
+            <option value="">全部</option>
+            <option value="role.change">改角色</option>
+            <option value="user.ban">封禁</option>
+            <option value="user.unban">解封</option>
+            <option value="project.review">项目审核</option>
+            <option value="forum.feature">论坛精选</option>
+            <option value="forum.rule_update">板块规则</option>
+            <option value="trash.purge">彻底删除</option>
+            <option value="trash.restore">回收站恢复</option>
+            <option value="report.resolve">举报处理</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="auditError" class="error">{{ auditError }}</p>
+      <p v-else-if="audit.length === 0" class="meta">没有匹配的审计记录。</p>
+      <table v-else>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>操作者</th>
+            <th>动作</th>
+            <th>对象</th>
+            <th>详情</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="entry in audit" :key="entry.id">
+            <td class="mono">{{ entry.created_at }}</td>
+            <td>{{ entry.actor_username ?? entry.actor_id }}</td>
+            <td class="mono">{{ entry.action }}</td>
+            <td>{{ entry.target_kind }}<template v-if="entry.target_id"> #{{ entry.target_id }}</template></td>
+            <td>{{ entry.detail ?? '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <nav v-if="total > perPage" class="pager">
       <button class="btn" :disabled="page <= 1" @click="page--; load()">上一页</button>

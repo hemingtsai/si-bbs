@@ -228,12 +228,16 @@ async fn resolving_a_report_records_the_decision_and_is_audited() {
         .await
         .assert_status(StatusCode::BAD_REQUEST);
 
-    // And the decision is in the audit log.
-    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log ORDER BY id")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    assert_eq!(actions, ["report.resolve"]);
+    // And the decision is in the audit log, together with the reason for it — the
+    // status alone would not tell a later reader why it was dismissed.
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT action, detail FROM audit_log ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, "report.resolve");
+    assert_eq!(rows[0].1.as_deref(), Some("dismissed: 不是广告"));
 }
 
 #[tokio::test]

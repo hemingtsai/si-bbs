@@ -42,6 +42,35 @@ export interface ProfileInput {
   avatar_url?: string
 }
 
+export interface AdminReport {
+  id: number
+  reporter_id: number
+  reporter_username: string | null
+  target_kind: 'forum_post' | 'forum_comment' | 'wiki' | 'project' | 'comment'
+  target_id: number
+  reason: string
+  status: 'open' | 'resolved' | 'dismissed'
+  handled_by: number | null
+  handled_by_username: string | null
+  handled_at: string | null
+  note: string | null
+  /// Title of the reported content, and whether it has since been deleted.
+  target_title: string | null
+  target_deleted: number
+  created_at: string
+}
+
+export interface AuditEntry {
+  id: number
+  actor_id: number
+  actor_username: string | null
+  action: string
+  target_kind: string
+  target_id: number | null
+  detail: string | null
+  created_at: string
+}
+
 export interface MyReport {
   id: number
   target_kind: 'forum_post' | 'forum_comment' | 'wiki' | 'project' | 'comment'
