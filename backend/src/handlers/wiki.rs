@@ -8,8 +8,8 @@ use crate::middleware::auth::require_auth;
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::models::wiki::{
-    RevertInput, WikiInput, WikiListQuery, WikiPageJoined, WikiPageOut, WikiRevision,
-    WikiRevisionDetail, WikiStatus, slugify,
+    RevertInput, WikiInput, WikiListQuery, WikiPageJoined, WikiPageOut, WikiPageSummary,
+    WikiRevision, WikiRevisionDetail, WikiStatus, slugify,
 };
 use crate::routes::AppState;
 use crate::services::reports;
@@ -17,6 +17,12 @@ use crate::services::reports;
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CATEGORY_LEN: usize = 40;
 const MAX_CONTENT_LEN: usize = 200_000;
+
+/// Summary projection for lists: no body, just an opening excerpt.
+const PAGE_SUMMARY_SELECT: &str = "SELECT w.id, w.title, w.slug, w.category, w.status, \
+     w.author_id, w.revision, COALESCE(u.display_name, u.username) AS author_username, \
+     substr(w.content, 1, 160) AS excerpt, w.created_at, w.updated_at \
+     FROM wiki_pages w LEFT JOIN users u ON u.id = w.author_id";
 
 const PAGE_SELECT: &str = "SELECT w.id, w.title, w.slug, w.category, w.content, w.status, \
      w.author_id, w.revision, w.created_at, w.updated_at, \
@@ -148,7 +154,7 @@ async fn unique_slug(state: &AppState, base: &str) -> String {
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<WikiListQuery>,
-) -> Result<Json<Page<WikiPageOut>>, AppError> {
+) -> Result<Json<Page<WikiPageSummary>>, AppError> {
     let per_page = q.per_page.unwrap_or(20).clamp(1, 100);
     let page = q.page.unwrap_or(1).max(1);
     let category = q
@@ -175,9 +181,10 @@ pub async fn list(
     .await?;
 
     let sql = format!(
-        "{PAGE_SELECT} WHERE {filters} ORDER BY w.updated_at DESC, w.id DESC LIMIT ?3 OFFSET ?4"
+        "{PAGE_SUMMARY_SELECT} WHERE {filters} ORDER BY w.updated_at DESC, w.id DESC \
+         LIMIT ?3 OFFSET ?4"
     );
-    let rows: Vec<WikiPageJoined> = sqlx::query_as(&sql)
+    let items: Vec<WikiPageSummary> = sqlx::query_as(&sql)
         .bind(category)
         .bind(keyword.as_deref())
         .bind(per_page)
@@ -186,7 +193,7 @@ pub async fn list(
         .await?;
 
     Ok(Json(Page {
-        items: rows.into_iter().map(WikiPageOut::from).collect(),
+        items,
         total,
         page,
         per_page,
@@ -242,7 +249,7 @@ pub async fn mine(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<WikiListQuery>,
-) -> Result<Json<Page<WikiPageOut>>, AppError> {
+) -> Result<Json<Page<WikiPageSummary>>, AppError> {
     let claims = require_auth(&state, &headers).await?;
     let per_page = q.per_page.unwrap_or(20).clamp(1, 100);
     let page = q.page.unwrap_or(1).max(1);
@@ -264,9 +271,10 @@ pub async fn mine(
     .await?;
 
     let sql = format!(
-        "{PAGE_SELECT} WHERE {where_sql} ORDER BY w.updated_at DESC, w.id DESC LIMIT ?2 OFFSET ?3"
+        "{PAGE_SUMMARY_SELECT} WHERE {where_sql} ORDER BY w.updated_at DESC, w.id DESC \
+         LIMIT ?2 OFFSET ?3"
     );
-    let rows: Vec<WikiPageJoined> = sqlx::query_as(&sql)
+    let items: Vec<WikiPageSummary> = sqlx::query_as(&sql)
         .bind(binds.first().copied())
         .bind(per_page)
         .bind((page - 1) * per_page)
@@ -274,7 +282,7 @@ pub async fn mine(
         .await?;
 
     Ok(Json(Page {
-        items: rows.into_iter().map(WikiPageOut::from).collect(),
+        items,
         total,
         page,
         per_page,

@@ -2,6 +2,7 @@
 
 export type Role = 'admin' | 'moderator' | 'user'
 export type ProjectStatus = 'pending' | 'approved' | 'rejected'
+export type ForumBoard = 'models' | 'tools' | 'life'
 
 export interface Page<T> {
   items: T[]
@@ -44,6 +45,45 @@ export interface Project {
   reviewed_by: number | null
   review_note: string | null
   readme_fetched_at: string | null
+  readme_attempted_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * List payloads deliberately omit the bodies (a page of 20 wiki pages or project
+ * READMEs could be megabytes) and carry a short `excerpt` instead. Detail views use
+ * the full types below.
+ */
+export interface ProjectSummary
+  extends Omit<Project, 'readme_raw' | 'readme_fetched_at' | 'readme_attempted_at'> {
+  excerpt?: string
+}
+
+export interface WikiPageSummary {
+  id: number
+  title: string
+  slug: string
+  category: string
+  status: 'draft' | 'published'
+  author_id: number
+  author_username: string | null
+  revision: number
+  excerpt?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ForumPostSummary {
+  id: number
+  board: ForumBoard
+  title: string
+  author_id: number
+  author_username: string | null
+  is_featured: number
+  likes_count: number
+  comments_count: number
+  excerpt?: string
   created_at: string
   updated_at: string
 }
@@ -76,6 +116,7 @@ export interface WikiPage {
   status: 'draft' | 'published'
   author_id: number
   author_username: string | null
+  revision: number
   created_at: string
   updated_at: string
 }
@@ -114,8 +155,6 @@ export interface Stats {
   ratings: number
   trashed: number
 }
-export type ForumBoard = 'models' | 'tools' | 'life'
-
 export interface BoardInfo {
   slug: string
   post_count: number

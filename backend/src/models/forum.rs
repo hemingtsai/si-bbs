@@ -90,6 +90,24 @@ pub struct BoardInfo {
     pub post_count: i64,
 }
 
+/// A post as it appears in a list: no body. A page of 20 full posts could be a
+/// megabyte of Markdown that the list view never renders.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ForumPostSummary {
+    pub id: i64,
+    pub board: String,
+    pub title: String,
+    pub author_id: i64,
+    pub author_username: Option<String>,
+    pub is_featured: i64,
+    pub likes_count: i64,
+    pub comments_count: i64,
+    /// Opening of the body, for previews.
+    pub excerpt: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PostInput {
     pub board: String,

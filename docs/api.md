@@ -167,6 +167,21 @@ SMTP 配置、也没有引入邮件依赖）。因此当前行为是：把形如
 - 要真正"自助"，需要接入邮件投递（例如 lettre + SMTP 环境变量），
   这是部署侧的下一步，见 `docs/deployment.md`。
 
+## 列表与详情的字段差异
+
+列表接口**不返回正文**，只返回 `excerpt`（正文前 160 字符）；正文只在详情接口里。
+这是刻意的：一页 20 条 wiki 正文或项目 README 曾经是几百 KB 到数 MB 的无用负载
+（wiki 正文上限 20 万字符），而列表页从不渲染它们。
+
+| 列表接口 | 详情接口 | 列表里没有 |
+| --- | --- | --- |
+| `GET /api/wiki`、`/api/wiki/mine` | `GET /api/wiki/{slug}` | `content`（改为 `excerpt`） |
+| `GET /api/forum/posts` | `GET /api/forum/posts/{id}` | `content`（改为 `excerpt`） |
+| `GET /api/projects`、`/projects/mine`、`/projects/review-queue` | `GET /api/projects/{id}` | `readme_raw`、`readme_fetched_at`、`readme_attempted_at` |
+
+前端类型也相应拆成 `WikiPageSummary` / `ForumPostSummary` / `ProjectSummary`
+与详情类型；把列表当详情用会在 `vue-tsc` 阶段直接报错。
+
 ## 全局搜索
 
 | 方法 | 路径 | 权限 | 说明 |

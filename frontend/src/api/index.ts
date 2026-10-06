@@ -1,6 +1,9 @@
 import { api } from './axios'
 import type {
   AdminUser,
+  ForumPostSummary,
+  ProjectSummary,
+  WikiPageSummary,
   Comment,
   BoardInfo,
   ForumBoard,
@@ -26,15 +29,15 @@ export const projectsApi = {
     sort?: 'stars' | 'recent' | 'name'
     page?: number
     per_page?: number
-  }) => api.get<Page<Project>>('/projects', { params }),
+  }) => api.get<Page<ProjectSummary>>('/projects', { params }),
   detail: (id: number) => api.get<Project>(`/projects/${id}`),
-  mine: (params?: { page?: number }) => api.get<Page<Project>>('/projects/mine', { params }),
+  mine: (params?: { page?: number }) => api.get<Page<ProjectSummary>>('/projects/mine', { params }),
   submit: (payload: { github_url: string; category: string; description?: string }) =>
     api.post<Project>('/projects', payload),
   review: (id: number, action: 'approve' | 'reject', note?: string) =>
     api.post<Project>(`/projects/${id}/review`, { action, note }),
   reviewQueue: (params?: { page?: number }) =>
-    api.get<Page<Project>>('/projects/review-queue', { params }),
+    api.get<Page<ProjectSummary>>('/projects/review-queue', { params }),
   remove: (id: number) => api.delete<void>(`/projects/${id}`),
 }
 
@@ -55,10 +58,10 @@ export const commentsApi = {
 
 export const wikiApi = {
   list: (params?: { category?: string; q?: string; page?: number }) =>
-    api.get<Page<WikiPage>>('/wiki', { params }),
+    api.get<Page<WikiPageSummary>>('/wiki', { params }),
   detail: (slug: string) => api.get<WikiPage>(`/wiki/${slug}`),
   categories: () => api.get<WikiCategory[]>('/wiki/categories'),
-  mine: (params?: { page?: number }) => api.get<Page<WikiPage>>('/wiki/mine', { params }),
+  mine: (params?: { page?: number }) => api.get<Page<WikiPageSummary>>('/wiki/mine', { params }),
   create: (payload: {
     title: string
     category: string
@@ -101,7 +104,7 @@ export type { Me }
 export const forumApi = {
   boards: () => api.get<BoardInfo[]>('/forum/boards'),
   list: (params?: { board?: string; q?: string; page?: number; per_page?: number }) =>
-    api.get<Page<ForumPost>>('/forum/posts', { params }),
+    api.get<Page<ForumPostSummary>>('/forum/posts', { params }),
   detail: (id: number) => api.get<ForumPost>(`/forum/posts/${id}`),
   create: (payload: { board: ForumBoard; title: string; content: string }) =>
     api.post<ForumPost>('/forum/posts', payload),

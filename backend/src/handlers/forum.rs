@@ -5,8 +5,8 @@ use axum::http::{HeaderMap, StatusCode};
 use crate::error::AppError;
 use crate::middleware::auth::{require_auth, require_role};
 use crate::models::forum::{
-    Board, BoardInfo, CommentInput, FeaturedInput, ForumComment, ForumPostOut, ForumRule,
-    ListQuery, PostInput, RuleInput,
+    Board, BoardInfo, CommentInput, FeaturedInput, ForumComment, ForumPostOut, ForumPostSummary,
+    ForumRule, ListQuery, PostInput, RuleInput,
 };
 use crate::models::page::Page;
 use crate::models::user::Role;
@@ -15,6 +15,18 @@ use crate::services::{audit, reports};
 
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CONTENT_LEN: usize = 50_000;
+
+/// Summary projection for lists: the same counters, but `substr(content, 1, 160)`
+/// instead of the whole body.
+const POST_SUMMARY_SELECT: &str = "SELECT p.id, p.board, p.title, p.author_id, \
+     COALESCE(u.display_name, u.username) AS author_username, p.is_featured, \
+     (SELECT COUNT(*) FROM forum_likes l \
+      WHERE l.target_kind = 'post' AND l.target_id = p.id) AS likes_count, \
+     (SELECT COUNT(*) FROM forum_comments rc \
+      WHERE rc.post_id = p.id AND rc.deleted_at IS NULL) AS comments_count, \
+     substr(p.content, 1, 160) AS excerpt, \
+     p.created_at, p.updated_at \
+     FROM forum_posts p LEFT JOIN users u ON u.id = p.author_id";
 
 /// Like and reply counts are **derived**, never stored: `forum_likes` and
 /// `forum_comments` are the only source of truth. Keeping a counter column in
@@ -82,7 +94,7 @@ pub async fn boards(State(state): State<AppState>) -> Result<Json<Vec<BoardInfo>
 pub async fn list_posts(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
-) -> Result<Json<Page<ForumPostOut>>, AppError> {
+) -> Result<Json<Page<ForumPostSummary>>, AppError> {
     let per_page = q.per_page.unwrap_or(20).clamp(1, 100);
     let page = q.page.unwrap_or(1).max(1);
     let board =
@@ -111,10 +123,10 @@ pub async fn list_posts(
     .await?;
 
     let sql = format!(
-        "{POST_SELECT} WHERE {filters} \
+        "{POST_SUMMARY_SELECT} WHERE {filters} \
          ORDER BY p.is_featured DESC, p.created_at DESC, p.id DESC LIMIT ?3 OFFSET ?4"
     );
-    let items: Vec<ForumPostOut> = sqlx::query_as(&sql)
+    let items: Vec<ForumPostSummary> = sqlx::query_as(&sql)
         .bind(board.map(Board::as_str))
         .bind(keyword.as_deref())
         .bind(per_page)

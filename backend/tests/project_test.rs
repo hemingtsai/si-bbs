@@ -942,3 +942,74 @@ async fn a_readme_failure_still_refreshes_the_counters() {
             .unwrap();
     assert_eq!(fetched_before, fetched_after);
 }
+
+/// The project list used to return `readme_raw` for every row.
+#[tokio::test]
+async fn project_lists_omit_the_readme() {
+    let gh = mock_github("# a readme that would be large in production").await;
+    let (server, _pool) = test_ctx_with_github(&gh.uri()).await;
+    let alice = register_and_login(&server, "alice").await;
+    let id = submit(
+        &server,
+        &alice,
+        "https://github.com/BurntSushi/ripgrep",
+        "dev-tools",
+    )
+    .await
+    .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    sqlx::query("UPDATE projects SET status = 'approved' WHERE id = ?1")
+        .bind(id)
+        .execute(&_pool)
+        .await
+        .unwrap();
+
+    // A pending row so the review queue is not empty: the slimming assertion has to
+    // run on real rows, and the queue is mod+. (Inserted directly — submitting a
+    // second repo would need another GitHub mock.)
+    sqlx::query(
+        "INSERT INTO projects (name, github_url, owner, repo, description, category, status, submitted_by) \
+         VALUES ('pending one', 'https://github.com/o/pending-slim', 'o', 'pending-slim', \
+                 'still waiting', 'dev-tools', 'pending', 1)",
+    )
+    .execute(&_pool)
+    .await
+    .unwrap();
+    let mod_token = register_login_as_role(&server, &_pool, "mod", "moderator").await;
+
+    for (url, token) in [
+        ("/api/projects", &alice),
+        ("/api/projects/mine", &alice),
+        ("/api/projects/review-queue", &mod_token),
+    ] {
+        let res = server
+            .get(url)
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await;
+        res.assert_status_ok();
+        let items = res.json::<serde_json::Value>()["items"].clone();
+        let first = items
+            .as_array()
+            .and_then(|a| a.first())
+            .unwrap_or_else(|| panic!("{url} returned no rows to check"));
+        assert!(
+            first.get("readme_raw").is_none(),
+            "{url} shipped the readme"
+        );
+        assert!(
+            first.get("readme_fetched_at").is_none(),
+            "{url} shipped fetch metadata"
+        );
+    }
+
+    // Detail still has it.
+    let detail = server
+        .get(&format!("/api/projects/{id}"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(
+        detail["readme_raw"],
+        "# a readme that would be large in production"
+    );
+}

@@ -2,10 +2,10 @@
 import { onMounted, ref } from 'vue'
 
 import { projectsApi } from '../api'
-import type { Project } from '../api/types'
+import type { ProjectSummary } from '../api/types'
 import { apiError } from '../lib/errors'
 
-const pending = ref<Project[]>([])
+const pending = ref<ProjectSummary[]>([])
 const total = ref(0)
 const loading = ref(true)
 const error = ref('')
@@ -25,7 +25,7 @@ async function load(): Promise<void> {
   }
 }
 
-async function review(project: Project, action: 'approve' | 'reject'): Promise<void> {
+async function review(project: ProjectSummary, action: 'approve' | 'reject'): Promise<void> {
   try {
     await projectsApi.review(project.id, action, note.value || undefined)
     note.value = ''

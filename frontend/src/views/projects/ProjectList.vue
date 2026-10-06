@@ -2,10 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 
 import { projectsApi } from '../../api'
-import type { Project } from '../../api/types'
+import type { ProjectSummary } from '../../api/types'
 import { PROJECT_CATEGORIES } from '../../lib/categories'
 
-const projects = ref<Project[]>([])
+const projects = ref<ProjectSummary[]>([])
 const total = ref(0)
 const page = ref(1)
 const perPage = 20

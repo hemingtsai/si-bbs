@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { forumApi } from '../../api'
-import type { BoardInfo, ForumBoard, ForumPost, ForumRule } from '../../api/types'
+import type { BoardInfo, ForumBoard, ForumPostSummary, ForumRule } from '../../api/types'
 import MarkdownView from '../../components/MarkdownView.vue'
 
 const boards = ref<BoardInfo[]>([])
 const activeBoard = ref<ForumBoard | ''>('')
-const posts = ref<ForumPost[]>([])
+const posts = ref<ForumPostSummary[]>([])
 const total = ref(0)
 const page = ref(1)
 const perPage = 20
@@ -16,7 +16,7 @@ const rules = ref<ForumRule[]>([])
 const showRules = ref(true)
 
 const boardLabel: Record<string, string> = { '': '全部', models: '模型讨论', tools: '工具交流', life: '谈天说地' }
-const boardOf = (p: ForumPost) => p.board as keyof typeof boardLabel
+const boardOf = (p: ForumPostSummary) => p.board as keyof typeof boardLabel
 
 async function loadBoards(): Promise<void> {
   const { data } = await forumApi.boards()

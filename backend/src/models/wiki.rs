@@ -65,6 +65,22 @@ pub struct WikiPageOut {
     pub updated_at: NaiveDateTime,
 }
 
+/// A page as it appears in a list: no body.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct WikiPageSummary {
+    pub id: i64,
+    pub title: String,
+    pub slug: String,
+    pub category: String,
+    pub status: String,
+    pub author_id: i64,
+    pub author_username: Option<String>,
+    pub revision: i64,
+    pub excerpt: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct WikiPageJoined {
     pub id: i64,

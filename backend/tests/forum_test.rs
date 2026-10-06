@@ -569,3 +569,44 @@ async fn post_reply_count(server: &TestServer, post_id: i64) -> i64 {
         .as_i64()
         .unwrap()
 }
+
+/// List payloads must not carry the bodies: a page of 20 posts is otherwise
+/// hundreds of kilobytes of Markdown that the list view never renders.
+#[tokio::test]
+async fn list_payloads_omit_bodies_and_carry_an_excerpt() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let body = "正文".repeat(500);
+    let post = create_post(&server, &alice, "life", "带长正文的帖子")
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .patch(&format!("/api/forum/posts/{post}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"board": "life", "title": "带长正文的帖子", "content": body}))
+        .await
+        .assert_status_ok();
+
+    let item = server
+        .get("/api/forum/posts?board=life")
+        .await
+        .json::<serde_json::Value>()["items"][0]
+        .clone();
+    assert!(
+        item.get("content").is_none(),
+        "list shipped the body: {item}"
+    );
+    assert!(
+        item["excerpt"].as_str().unwrap().chars().count() <= 160,
+        "excerpt is not bounded"
+    );
+    // The detail endpoint still has the body — that is the point of the split.
+    let detail = server
+        .get(&format!("/api/forum/posts/{post}"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(detail["content"], body);
+    let _ = pool;
+}

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::error::AppError;
 use crate::middleware::auth::{require_auth, require_role};
 use crate::models::page::Page;
-use crate::models::project::{Project, ProjectOut, ProjectStatus};
+use crate::models::project::{Project, ProjectOut, ProjectStatus, ProjectSummary};
 use crate::models::user::Role;
 use crate::routes::AppState;
 use crate::services::github::{self, GithubClient};
@@ -21,6 +21,12 @@ const README_TTL_HOURS: i64 = 24;
 /// timeout: the failure path kept the cached document but never recorded that it
 /// had tried.
 const README_RETRY_MINUTES: i64 = 10;
+
+/// Summary projection for lists: everything except `readme_raw`, which is by far
+/// the largest column (a page of 20 projects could otherwise be megabytes).
+const PROJECT_SUMMARY_COLUMNS: &str = "id, name, github_url, owner, repo, description, \
+     language, stars, forks, license, topics, category, status, submitted_by, reviewed_by, \
+     review_note, created_at, updated_at";
 
 const PROJECT_COLUMNS: &str = "id, name, github_url, owner, repo, description, readme_raw, \
      language, stars, forks, license, topics, category, status, submitted_by, reviewed_by, \
@@ -126,7 +132,7 @@ pub async fn submit(
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
-) -> Result<Json<Page<ProjectOut>>, AppError> {
+) -> Result<Json<Page<ProjectSummary>>, AppError> {
     let (page, per_page) = paging(q.page, q.per_page);
     let keyword =
         q.q.as_deref()
@@ -155,9 +161,10 @@ pub async fn list(
         .await?;
 
     let sql = format!(
-        "SELECT {PROJECT_COLUMNS} FROM projects WHERE {filters} ORDER BY {order} LIMIT ?3 OFFSET ?4"
+        "SELECT {PROJECT_SUMMARY_COLUMNS} FROM projects WHERE {filters} ORDER BY {order} \
+         LIMIT ?3 OFFSET ?4"
     );
-    let rows: Vec<Project> = sqlx::query_as(&sql)
+    let items: Vec<ProjectSummary> = sqlx::query_as(&sql)
         .bind(category)
         .bind(keyword.as_deref())
         .bind(per_page)
@@ -166,7 +173,7 @@ pub async fn list(
         .await?;
 
     Ok(Json(Page {
-        items: rows.into_iter().map(ProjectOut::from).collect(),
+        items,
         total,
         page,
         per_page,
@@ -207,7 +214,7 @@ pub async fn mine(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<MineQuery>,
-) -> Result<Json<Page<ProjectOut>>, AppError> {
+) -> Result<Json<Page<ProjectSummary>>, AppError> {
     let claims = require_auth(&state, &headers).await?;
     let (page, per_page) = paging(q.page, q.per_page);
 
@@ -219,10 +226,11 @@ pub async fn mine(
     .await?;
 
     let sql = format!(
-        "SELECT {PROJECT_COLUMNS} FROM projects WHERE deleted_at IS NULL AND submitted_by = ?1 \
+        "SELECT {PROJECT_SUMMARY_COLUMNS} FROM projects \
+         WHERE deleted_at IS NULL AND submitted_by = ?1 \
          ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3"
     );
-    let rows: Vec<Project> = sqlx::query_as(&sql)
+    let items: Vec<ProjectSummary> = sqlx::query_as(&sql)
         .bind(claims.sub)
         .bind(per_page)
         .bind((page - 1) * per_page)
@@ -230,7 +238,7 @@ pub async fn mine(
         .await?;
 
     Ok(Json(Page {
-        items: rows.into_iter().map(ProjectOut::from).collect(),
+        items,
         total,
         page,
         per_page,
@@ -304,7 +312,7 @@ pub async fn review_queue(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<MineQuery>,
-) -> Result<Json<Page<ProjectOut>>, AppError> {
+) -> Result<Json<Page<ProjectSummary>>, AppError> {
     require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
     let (page, per_page) = paging(q.page, q.per_page);
 
@@ -315,17 +323,18 @@ pub async fn review_queue(
     .await?;
 
     let sql = format!(
-        "SELECT {PROJECT_COLUMNS} FROM projects WHERE deleted_at IS NULL AND status = 'pending' \
+        "SELECT {PROJECT_SUMMARY_COLUMNS} FROM projects \
+         WHERE deleted_at IS NULL AND status = 'pending' \
          ORDER BY created_at ASC, id ASC LIMIT ?1 OFFSET ?2"
     );
-    let rows: Vec<Project> = sqlx::query_as(&sql)
+    let items: Vec<ProjectSummary> = sqlx::query_as(&sql)
         .bind(per_page)
         .bind((page - 1) * per_page)
         .fetch_all(&state.pool)
         .await?;
 
     Ok(Json(Page {
-        items: rows.into_iter().map(ProjectOut::from).collect(),
+        items,
         total,
         page,
         per_page,

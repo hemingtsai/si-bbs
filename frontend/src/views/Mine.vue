@@ -2,10 +2,10 @@
 import { onMounted, ref } from 'vue'
 
 import { projectsApi, wikiApi } from '../api'
-import type { Project, WikiPage } from '../api/types'
+import type { ProjectSummary, WikiPageSummary } from '../api/types'
 
-const projects = ref<Project[]>([])
-const pages = ref<WikiPage[]>([])
+const projects = ref<ProjectSummary[]>([])
+const pages = ref<WikiPageSummary[]>([])
 const loading = ref(true)
 
 async function load(): Promise<void> {

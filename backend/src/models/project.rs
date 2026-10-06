@@ -55,6 +55,30 @@ pub struct Project {
     pub updated_at: NaiveDateTime,
 }
 
+/// A project as it appears in a list: no README. A page of 20 full READMEs is the
+/// single biggest response in the API.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ProjectSummary {
+    pub id: i64,
+    pub name: String,
+    pub github_url: String,
+    pub owner: String,
+    pub repo: String,
+    pub description: Option<String>,
+    pub language: Option<String>,
+    pub stars: i64,
+    pub forks: i64,
+    pub license: Option<String>,
+    pub topics: Option<String>,
+    pub category: String,
+    pub status: String,
+    pub submitted_by: i64,
+    pub reviewed_by: Option<i64>,
+    pub review_note: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
 impl Project {
     pub fn status_enum(&self) -> ProjectStatus {
         ProjectStatus::parse(&self.status).unwrap_or(ProjectStatus::Pending)

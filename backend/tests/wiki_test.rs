@@ -880,3 +880,38 @@ async fn diffing_a_draft_requires_the_author() {
         .await
         .assert_status(axum::http::StatusCode::BAD_REQUEST); // visible, just a silly range
 }
+
+#[tokio::test]
+async fn wiki_lists_omit_bodies_but_details_keep_them() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let body = "内容".repeat(500);
+    let created = server
+        .post("/api/wiki")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({
+            "title": "长正文页面", "category": "c", "content": body, "status": "published",
+        }))
+        .await;
+    let page = created.json::<serde_json::Value>();
+    let slug = page["slug"].as_str().unwrap().to_string();
+    assert_eq!(page["content"], body, "creation echoes the body");
+
+    for url in ["/api/wiki", "/api/wiki/mine"] {
+        let res = server
+            .get(url)
+            .add_header("Authorization", format!("Bearer {alice}"))
+            .await;
+        res.assert_status_ok();
+        let item = res.json::<serde_json::Value>()["items"][0].clone();
+        assert!(item.get("content").is_none(), "{url} shipped the body");
+        assert!(item["excerpt"].as_str().unwrap().chars().count() <= 160);
+    }
+
+    // Detail keeps it.
+    let detail = server
+        .get(&format!("/api/wiki/{slug}"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(detail["content"], body);
+}

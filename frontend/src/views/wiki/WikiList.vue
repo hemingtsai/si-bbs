@@ -2,11 +2,11 @@
 import { onMounted, ref } from 'vue'
 
 import { wikiApi } from '../../api'
-import type { WikiCategory, WikiPage } from '../../api/types'
+import type { WikiCategory, WikiPageSummary } from '../../api/types'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
-const pages = ref<WikiPage[]>([])
+const pages = ref<WikiPageSummary[]>([])
 const categories = ref<WikiCategory[]>([])
 const total = ref(0)
 const page = ref(1)
