@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::Router;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -6,11 +8,34 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::config::Config;
 use crate::handlers::{admin, auth, comment, forum, project, rating, trash, wiki};
+use crate::services::ratelimit::{self, RateLimiter};
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub cfg: Config,
+    /// Failed-login budget per account. Owned per state rather than global, so
+    /// tests and restarts never inherit another instance's counters.
+    pub login_limiter: Arc<RateLimiter>,
+    /// Sign-up budget for the whole process.
+    pub register_limiter: Arc<RateLimiter>,
+}
+
+impl AppState {
+    pub fn new(pool: SqlitePool, cfg: Config) -> Self {
+        Self {
+            pool,
+            cfg,
+            login_limiter: Arc::new(RateLimiter::new(
+                ratelimit::LOGIN_MAX_FAILURES,
+                ratelimit::LOGIN_WINDOW,
+            )),
+            register_limiter: Arc::new(RateLimiter::new(
+                ratelimit::REGISTER_MAX_ATTEMPTS,
+                ratelimit::REGISTER_WINDOW,
+            )),
+        }
+    }
 }
 
 pub fn create_router(state: AppState) -> Router {

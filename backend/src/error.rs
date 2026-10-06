@@ -10,6 +10,8 @@ pub enum AppError {
     Conflict(String),
     Unauthorized,
     Forbidden,
+    /// Carries the wait so the response can advertise `Retry-After`.
+    TooManyRequests { retry_after_secs: u64 },
     Internal(String),
 }
 
@@ -21,6 +23,7 @@ impl AppError {
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -33,6 +36,9 @@ impl std::fmt::Display for AppError {
             Self::BadRequest(m) | Self::Conflict(m) => write!(f, "{m}"),
             Self::Unauthorized => write!(f, "unauthorized"),
             Self::Forbidden => write!(f, "forbidden"),
+            Self::TooManyRequests { retry_after_secs } => {
+                write!(f, "too many requests, retry in {retry_after_secs}s")
+            }
             Self::Internal(m) => write!(f, "{m}"),
         }
     }
@@ -41,6 +47,10 @@ impl std::fmt::Display for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let status = self.status();
+        let retry_after_secs = match &self {
+            Self::TooManyRequests { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        };
         let body = match &self {
             // The client only ever gets a generic message, so this log line is the
             // only place the real cause survives: `From<sqlx::Error>` funnels the
@@ -54,8 +64,22 @@ impl IntoResponse for AppError {
             Self::NotFound => json!({ "error": "not found" }),
             Self::Unauthorized => json!({ "error": "unauthorized" }),
             Self::Forbidden => json!({ "error": "forbidden" }),
+            Self::TooManyRequests {
+                retry_after_secs,
+            } => json!({
+                "error": format!("too many requests, retry in {retry_after_secs} seconds")
+            }),
         };
-        (status, Json(body)).into_response()
+
+        let mut response = (status, Json(body)).into_response();
+        if let Some(secs) = retry_after_secs
+            && let Ok(value) = axum::http::HeaderValue::from_str(&secs.to_string())
+        {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+        response
     }
 }
 

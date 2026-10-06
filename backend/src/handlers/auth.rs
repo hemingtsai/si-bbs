@@ -8,6 +8,7 @@ use crate::middleware::auth::require_auth;
 use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
+use crate::services::validate;
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
@@ -16,32 +17,51 @@ pub struct RegisterReq {
     pub password: String,
 }
 
+/// The register limiter is process-wide, so it needs a constant key.
+const REGISTER_LIMIT_KEY: &str = "register";
+
 pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterReq>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
-    if body.username.trim().is_empty() || body.email.trim().is_empty() {
-        return Err(AppError::BadRequest("username/email required".into()));
+    // Shape checks first: they are free and must run before any hashing.
+    let username = validate::username(&body.username).map_err(AppError::BadRequest)?;
+    let email = validate::email(&body.email).map_err(AppError::BadRequest)?;
+    validate::password(&body.password).map_err(AppError::BadRequest)?;
+
+    if let Some(retry_after_secs) = state.register_limiter.retry_after(REGISTER_LIMIT_KEY) {
+        return Err(AppError::TooManyRequests { retry_after_secs });
     }
-    if body.password.len() < 6 {
-        return Err(AppError::BadRequest("password too short".into()));
-    }
+    state.register_limiter.record(REGISTER_LIMIT_KEY);
+
     let hash = auth::hash_password(&body.password)
         .await
         .map_err(AppError::Internal)?;
+
+    // `INSERT ... SELECT ... WHERE NOT EXISTS` keeps the case-insensitive
+    // duplicate test and the insert in one statement, so two concurrent
+    // requests cannot both pass the check. Plain UNIQUE sees `Alice` and
+    // `alice` as different rows, which is how impersonation accounts appear.
     let res = sqlx::query(
-        "INSERT INTO users (username, email, password_hash, role) VALUES (?1, ?2, ?3, 'user')",
+        "INSERT INTO users (username, email, password_hash, role) \
+         SELECT ?1, ?2, ?3, 'user' \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM users WHERE lower(username) = lower(?1) OR lower(email) = lower(?2) \
+         )",
     )
-    .bind(&body.username)
-    .bind(&body.email)
+    .bind(&username)
+    .bind(&email)
     .bind(&hash)
     .execute(&state.pool)
     .await;
+
     match res {
-        Ok(_) => Ok((
+        Ok(done) if done.rows_affected() == 1 => Ok((
             StatusCode::CREATED,
             Json(serde_json::json!({ "role": "user" })),
         )),
+        Ok(_) => Err(AppError::Conflict("username or email taken".into())),
+        // Defence in depth: a same-case duplicate still trips the column UNIQUE.
         Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
             Err(AppError::Conflict("username or email taken".into()))
         }
@@ -59,21 +79,36 @@ pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginReq>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // One bucket per account, case-folded so `Alice` and `alice` share a budget.
+    let limit_key = body.username.trim().to_lowercase();
+    if let Some(retry_after_secs) = state.login_limiter.retry_after(&limit_key) {
+        return Err(AppError::TooManyRequests { retry_after_secs });
+    }
+
     let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
         "SELECT id, username, password_hash, role, banned FROM users WHERE username = ?1",
     )
-    .bind(&body.username)
+    .bind(body.username.trim())
     .fetch_optional(&state.pool)
     .await?;
-    let (id, username, hash, role_str, banned) = row.ok_or(AppError::Unauthorized)?;
+
+    // Unknown account, wrong password and banned account all spend the same
+    // budget: anything else lets an attacker tell the cases apart by watching
+    // which one starts returning 429 first.
+    let Some((id, username, hash, role_str, banned)) = row else {
+        state.login_limiter.record(&limit_key);
+        return Err(AppError::Unauthorized);
+    };
     if !auth::verify_password(&body.password, &hash) {
+        state.login_limiter.record(&limit_key);
         return Err(AppError::Unauthorized);
     }
-    // Checked after the password so a wrong password still returns 401 rather
-    // than revealing that the account exists but is banned.
     if banned != 0 {
+        state.login_limiter.record(&limit_key);
         return Err(AppError::Forbidden);
     }
+
+    state.login_limiter.clear(&limit_key);
     let role = Role::parse(&role_str).unwrap_or(Role::User);
     let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role)
         .map_err(|e| AppError::Internal(e.to_string()))?;

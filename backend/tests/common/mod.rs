@@ -43,7 +43,7 @@ pub fn server_with(pool: SqlitePool, github_api_base: &str) -> TestServer {
         github_token: String::new(),
         github_api_base: github_api_base.to_string(),
     };
-    TestServer::new(create_router(AppState { pool, cfg }))
+    TestServer::new(create_router(AppState::new(pool, cfg)))
 }
 
 pub async fn test_server() -> TestServer {

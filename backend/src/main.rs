@@ -20,7 +20,7 @@ async fn main() {
         .expect("connect sqlite");
     db::migrate(&pool).await.expect("migrate");
 
-    let app = si_bbs_backend::create_router(AppState { pool, cfg });
+    let app = si_bbs_backend::create_router(AppState::new(pool, cfg));
     // BIND_ADDR defaults to all interfaces for local Docker; on a host that
     // fronts with Caddy it should be 127.0.0.1:3000 so the API is not public.
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into());

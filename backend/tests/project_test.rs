@@ -732,7 +732,7 @@ async fn github_token_is_sent_when_configured() {
         github_token: "test-token".into(),
         github_api_base: gh.uri(),
     };
-    let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState { pool, cfg });
+    let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState::new(pool, cfg));
     let server = TestServer::new(app);
     let alice = register_and_login(&server, "alice").await;
 

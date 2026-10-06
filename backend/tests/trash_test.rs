@@ -458,7 +458,7 @@ async fn trash_routes_are_mounted_in_the_shared_router() {
         github_token: String::new(),
         github_api_base: "https://api.github.com".into(),
     };
-    let _router: axum::Router = si_bbs_backend::create_router(AppState { pool, cfg });
+    let _router: axum::Router = si_bbs_backend::create_router(AppState::new(pool, cfg));
 }
 
 /// Regression: `comments.project_id` and `ratings.project_id` have no

@@ -28,8 +28,8 @@
 
 | 方法 | 路径 | 请求体 | 成功 | 说明 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/auth/register` | `{username, email, password}` | 201 `{role}` | 密码最少 6 位；重复返回 409 |
-| POST | `/api/auth/login` | `{username, password}` | 200 `{access_token, refresh_token, role, user_id, username}` | 封禁账号返回 403 |
+| POST | `/api/auth/register` | `{username, email, password}` | 201 `{role}` | 用户名 3–32 字符且只允许字母/数字/`_`/`-`；邮箱需含单个 `@` 与带点域名且 ≤254 字符；密码 6–128 **字符**。用户名或邮箱重复（**忽略大小写**）返回 409；超限返回 400；注册接口有进程级配额，超限 429 |
+| POST | `/api/auth/login` | `{username, password}` | 200 `{access_token, refresh_token, role, user_id, username}` | 封禁账号返回 403；同一账号（忽略大小写）在 5 分钟内失败 8 次后返回 429 并带 `Retry-After`，登录成功即清零 |
 | POST | `/api/auth/refresh` | `{refresh_token}` | 200 `{access_token, refresh_token}` | 会重新读取数据库角色；被封禁或被删返回 403/401 |
 | GET | `/api/auth/me` | — | 200 `{id, username, role, banned}` | 角色以数据库为准 |
 
@@ -106,5 +106,6 @@
 | 401 | 未登录或 token 无效；恢复的 token 对被删用户也是 401 |
 | 403 | 已登录但角色不够、被封禁、或操作他人的资源 |
 | 404 | 资源不存在，或对当前用户不可见（pending 项目、草稿） |
-| 409 | 唯一冲突（用户名/邮箱/GitHub URL、slug） |
-| 500 | 服务端错误 |
+| 409 | 唯一冲突（用户名/邮箱忽略大小写、GitHub URL、slug） |
+| 429 | 触发限流（当前只有 `/api/auth/login` 与 `/api/auth/register`），响应带 `Retry-After` 秒数 |
+| 500 | 服务端错误（响应体只有通用文案，真实原因写进服务端日志） |
