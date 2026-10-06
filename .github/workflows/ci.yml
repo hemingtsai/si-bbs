@@ -32,6 +32,9 @@ jobs:
       # Dockerfile for releases, and edition 2024 only needs 1.85+.
       - name: 工具链版本
         run: rustc --version && cargo --version
+      - name: rustfmt
+        working-directory: backend
+        run: cargo fmt --all -- --check
       - name: clippy（警告即失败）
         working-directory: backend
         run: cargo clippy --all-targets -- -D warnings
