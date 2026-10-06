@@ -17,13 +17,41 @@ export interface AuthTokens {
   role: Role
   user_id: number
   username: string
+  /// Present when the endpoint that minted the pair also knows the profile (a
+  /// password change returns them, so the shell can update without a second call).
+  display_name?: string | null
+  avatar_url?: string | null
 }
 
 export interface Me {
   id: number
   username: string
+  /// What readers see instead of the login name, when set.
+  display_name: string | null
+  email: string
+  bio: string | null
+  avatar_url: string | null
   role: Role
   banned: boolean
+  created_at: string
+}
+
+export interface ProfileInput {
+  display_name?: string
+  bio?: string
+  avatar_url?: string
+}
+
+export interface MyReport {
+  id: number
+  target_kind: 'forum_post' | 'forum_comment' | 'wiki' | 'project' | 'comment'
+  target_id: number
+  reason: string
+  status: 'open' | 'resolved' | 'dismissed'
+  note: string | null
+  target_title: string | null
+  created_at: string
+  handled_at: string | null
 }
 
 export interface Project {

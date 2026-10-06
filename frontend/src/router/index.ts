@@ -56,6 +56,12 @@ export const router = createRouter({
     },
     { path: '/me', name: 'mine', component: () => import('../views/Mine.vue'), meta: { requiresAuth: true } },
     {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/Profile.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/moderation',
       name: 'moderation',
       component: () => import('../views/Moderation.vue'),

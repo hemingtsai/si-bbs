@@ -220,10 +220,30 @@ code {
 }
 
 .sidebar-foot .user {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The name doubles as the way into the settings page. */
+.sidebar-foot .user-link {
+  text-decoration: none;
+}
+
+.sidebar-foot .user-link:hover {
+  color: var(--text);
+}
+
+.user-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
 }
 
 .main {

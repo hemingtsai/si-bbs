@@ -86,7 +86,17 @@ describe('auth store', () => {
     setActivePinia(createPinia())
 
     vi.mocked(api.get).mockResolvedValue({
-      data: { id: 1, username: 'alice', role: 'user', banned: false },
+      data: {
+        id: 1,
+        username: 'alice',
+        display_name: '爱丽丝',
+        email: 'alice@example.com',
+        bio: null,
+        avatar_url: 'https://cdn.example/a.png',
+        role: 'user',
+        banned: false,
+        created_at: '2025-01-01 00:00:00',
+      },
     })
 
     const store = useAuthStore()
@@ -94,6 +104,10 @@ describe('auth store', () => {
 
     expect(me.role).toBe('user')
     expect(store.role).toBe('user')
+    // The account payload also carries the profile fields, and the shell needs them.
+    expect(store.displayName).toBe('爱丽丝')
+    expect(store.shownName).toBe('爱丽丝')
+    expect(store.avatarUrl).toBe('https://cdn.example/a.png')
     expect(store.isAdmin).toBe(false)
   })
 
@@ -125,5 +139,77 @@ describe('auth store', () => {
     expect(store.role).toBeNull()
     expect(store.username).toBeNull()
     expect(store.userId).toBeNull()
+  })
+})
+describe('auth store profile handling', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('falls back to the login name when there is no display name', async () => {
+    const { useAuthStore } = await import('../../src/stores/auth')
+    api.get = vi.fn().mockResolvedValue({
+      data: {
+        id: 2,
+        username: 'bob',
+        display_name: null,
+        email: 'bob@example.com',
+        bio: null,
+        avatar_url: null,
+        role: 'user',
+        banned: false,
+        created_at: '2025-01-01 00:00:00',
+      },
+    })
+    const store = useAuthStore()
+    await store.fetchMe()
+    expect(store.shownName).toBe('bob')
+    expect(localStorage.getItem('user_display_name')).toBeNull()
+  })
+
+  it('clears the cached display name when the server says there is none', async () => {
+    localStorage.setItem('user_display_name', '旧昵称')
+    localStorage.setItem('user_avatar_url', 'https://cdn.example/old.png')
+    const { useAuthStore } = await import('../../src/stores/auth')
+    api.patch = vi.fn().mockResolvedValue({
+      data: {
+        id: 3,
+        username: 'carol',
+        display_name: null,
+        email: 'carol@example.com',
+        bio: null,
+        avatar_url: null,
+        role: 'user',
+        banned: false,
+        created_at: '2025-01-01 00:00:00',
+      },
+    })
+    const store = useAuthStore()
+    await store.updateProfile({ display_name: '' })
+    expect(store.displayName).toBeNull()
+    expect(localStorage.getItem('user_display_name')).toBeNull()
+    expect(localStorage.getItem('user_avatar_url')).toBeNull()
+  })
+
+  it('stores the fresh token pair a password change returns', async () => {
+    localStorage.setItem('access_token', 'old-access')
+    const { useAuthStore } = await import('../../src/stores/auth')
+    api.post = vi.fn().mockResolvedValue({
+      data: {
+        access_token: 'new-access',
+        refresh_token: 'new-refresh',
+        role: 'user',
+        user_id: 4,
+        username: 'dave',
+      },
+    })
+    const store = useAuthStore()
+    await store.changePassword({ current_password: 'a', new_password: 'b' })
+    // Without this the next request would 401: the server killed the old token.
+    expect(store.accessToken).toBe('new-access')
+    expect(localStorage.getItem('access_token')).toBe('new-access')
+    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
   })
 })

@@ -1,7 +1,11 @@
 import { api } from './axios'
 import type {
   AdminUser,
+  AuthTokens,
   ForumPostSummary,
+  Me,
+  MyReport,
+  ProfileInput,
   ProjectSummary,
   WikiPageSummary,
   Comment,
@@ -10,7 +14,6 @@ import type {
   ForumComment,
   ForumPost,
   ForumRule,
-  Me,
   Page,
   Project,
   RateAck,
@@ -93,11 +96,19 @@ export const adminApi = {
 }
 
 export const authApi = {
-  me: () => api.get<Me>('/auth/me'),
+  /// Everything about the caller, including the profile fields. `me` is the same
+  /// endpoint family; this one carries the extra columns the settings page needs.
+  profile: () => api.get<Me>('/auth/profile'),
   login: (payload: { username: string; password: string }) =>
-    api.post<import('./types').AuthTokens>('/auth/login', payload),
+    api.post<AuthTokens>('/auth/login', payload),
   register: (payload: { username: string; email: string; password: string }) =>
     api.post<{ role: Role }>('/auth/register', payload),
+  updateProfile: (payload: ProfileInput) => api.patch<Me>('/auth/profile', payload),
+  /// Returns a fresh token pair: the server invalidates every earlier token.
+  changePassword: (payload: { current_password: string; new_password: string }) =>
+    api.post<AuthTokens>('/auth/password', payload),
+  changeEmail: (payload: { password: string; new_email: string }) =>
+    api.post<{ email: string }>('/auth/email', payload),
 }
 
 export type { Me }
@@ -124,4 +135,11 @@ export const forumApi = {
   rules: (board?: string) => api.get<ForumRule[]>('/forum/rules', board ? { params: { board } } : undefined),
   upsertRule: (board: string, payload: { title: string; content: string }) =>
     api.put<ForumRule>(`/forum/rules/${board}`, payload),
+}
+
+export const reportApi = {
+  create: (payload: { target_kind: string; target_id: number; reason: string }) =>
+    api.post<{ status: string }>('/reports', payload),
+  /// The caller's own reports and what happened to them.
+  mine: (params?: { page?: number }) => api.get<Page<MyReport>>('/reports/mine', { params }),
 }

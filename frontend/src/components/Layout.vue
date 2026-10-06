@@ -52,11 +52,16 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
       <RouterLink v-if="auth.isStaff" to="/moderation" class="nav-item">审核</RouterLink>
       <RouterLink v-if="auth.isAdmin" to="/admin" class="nav-item">管理</RouterLink>
       <RouterLink v-if="auth.isAuthenticated" to="/me" class="nav-item">我的</RouterLink>
+      <RouterLink v-if="auth.isAuthenticated" to="/settings" class="nav-item">设置</RouterLink>
       <RouterLink v-if="auth.isAuthenticated" to="/trash" class="nav-item">回收站</RouterLink>
       <RouterLink v-if="!auth.isAuthenticated" to="/login" class="nav-item">登录</RouterLink>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">
-        <span class="user">{{ auth.username ?? '未登录' }}</span>
+        <RouterLink v-if="auth.isAuthenticated" to="/settings" class="user user-link">
+          <img v-if="auth.avatarUrl" class="user-avatar" :src="auth.avatarUrl" alt="" />
+          {{ auth.shownName ?? '未登录' }}
+        </RouterLink>
+        <span v-else class="user">未登录</span>
         <a class="linklike" href="/feed.xml">RSS</a>
         <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
         <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
@@ -68,7 +73,10 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
         <div class="mainbar-right">
           <!-- Only visible on <= 768px via .mobile-nav-only -->
           <div class="mobile-nav-only">
-            <span class="user">{{ auth.username ?? '未登录' }}</span>
+            <RouterLink v-if="auth.isAuthenticated" to="/settings" class="user user-link">
+              {{ auth.shownName }}
+            </RouterLink>
+            <span v-else class="user">未登录</span>
             <a class="linklike" href="/feed.xml">RSS</a>
         <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
             <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
