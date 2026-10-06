@@ -9,6 +9,7 @@ use crate::error::AppError;
 use crate::middleware::auth::{require_auth, require_role};
 use crate::models::user::Role;
 use crate::routes::AppState;
+use crate::services::audit;
 
 /// The soft-deletable entity kinds. `trash_view` unions exactly these, and a test
 /// asserts the two stay in step: a kind present in the view but missing here
@@ -149,6 +150,19 @@ pub async fn restore(
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+    // Restoring your own deletion is routine; a moderator digging someone else's
+    // content out of the bin is worth recording.
+    if is_staff(&claims.role) {
+        audit::record_best_effort(
+            &state.pool,
+            claims.sub,
+            audit::TRASH_RESTORE,
+            &kind,
+            Some(id),
+            None,
+        )
+        .await;
+    }
     Ok(Json(
         serde_json::json!({ "kind": kind, "id": id, "restored": true }),
     ))
@@ -193,7 +207,7 @@ pub async fn purge(
     headers: HeaderMap,
     Path((kind, id)): Path<(String, i64)>,
 ) -> Result<StatusCode, AppError> {
-    require_role(&state, &headers, &[Role::Admin]).await?;
+    let claims = require_role(&state, &headers, &[Role::Admin]).await?;
     if !KINDS.contains(&kind.as_str()) {
         return Err(AppError::NotFound);
     }
@@ -221,6 +235,18 @@ pub async fn purge(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+
+    // Written inside the same transaction: "an admin destroyed this row" must not
+    // survive on its own if the delete rolls back, nor go missing if it commits.
+    audit::record(
+        &mut *tx,
+        claims.sub,
+        audit::TRASH_PURGE,
+        &kind,
+        Some(id),
+        None,
+    )
+    .await?;
 
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)

@@ -11,6 +11,7 @@ use crate::models::forum::{
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
+use crate::services::audit;
 
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CONTENT_LEN: usize = 50_000;
@@ -233,7 +234,7 @@ pub async fn set_featured(
     Path(id): Path<i64>,
     Json(input): Json<FeaturedInput>,
 ) -> Result<Json<ForumPostOut>, AppError> {
-    require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
+    let claims = require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
 
     let res = sqlx::query(
         "UPDATE forum_posts SET is_featured = ?2, updated_at = CURRENT_TIMESTAMP \
@@ -246,6 +247,19 @@ pub async fn set_featured(
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+    audit::record_best_effort(
+        &state.pool,
+        claims.sub,
+        audit::FORUM_FEATURE,
+        "forum_post",
+        Some(id),
+        Some(if input.featured {
+            "featured"
+        } else {
+            "unfeatured"
+        }),
+    )
+    .await;
     Ok(Json(fetch_post(&state, id).await?))
 }
 
@@ -501,6 +515,16 @@ pub async fn upsert_rule(
     .bind(claims.sub)
     .execute(&state.pool)
     .await?;
+
+    audit::record_best_effort(
+        &state.pool,
+        claims.sub,
+        audit::FORUM_RULE_UPDATE,
+        "forum_rules",
+        None,
+        Some(&board),
+    )
+    .await;
 
     let rule: ForumRule = sqlx::query_as(
         "SELECT board, title, content, updated_by, updated_at FROM forum_rules WHERE board = ?1",

@@ -6,9 +6,11 @@ use sqlx::FromRow;
 
 use crate::error::AppError;
 use crate::middleware::auth::require_role;
+use crate::models::audit::AuditEntry;
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
+use crate::services::audit;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct UserListQuery {
@@ -137,6 +139,16 @@ pub async fn set_role(
         .await?;
     let _ = banned;
 
+    audit::record_best_effort(
+        &state.pool,
+        caller.sub,
+        audit::ROLE_CHANGE,
+        "user",
+        Some(id),
+        Some(&format!("{} → {}", old_role.as_str(), new_role.as_str())),
+    )
+    .await;
+
     Ok(Json(fetch_user(&state, id).await?))
 }
 
@@ -177,6 +189,20 @@ pub async fn set_ban(
         .bind(i64::from(input.banned))
         .execute(&state.pool)
         .await?;
+
+    audit::record_best_effort(
+        &state.pool,
+        caller.sub,
+        if input.banned {
+            audit::USER_BAN
+        } else {
+            audit::USER_UNBAN
+        },
+        "user",
+        Some(id),
+        None,
+    )
+    .await;
 
     Ok(Json(fetch_user(&state, id).await?))
 }
@@ -235,6 +261,56 @@ pub async fn stats(
         ratings,
         trashed,
     }))
+}
+
+/// Who did what to whom. Admin only.
+///
+/// `action` filters exactly, and the action names are the constants in
+/// `services::audit`, so `/api/admin/audit?action=user.ban` is a precise query.
+pub async fn list_audit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<Page<AuditEntry>>, AppError> {
+    require_role(&state, &headers, &[Role::Admin]).await?;
+
+    let per_page = q.per_page.unwrap_or(50).clamp(1, 100);
+    let page = q.page.unwrap_or(1).max(1);
+    let action = q.action.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let filters = "(?1 IS NULL OR a.action = ?1)";
+
+    let total: i64 =
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM audit_log a WHERE {filters}"))
+            .bind(action)
+            .fetch_one(&state.pool)
+            .await?;
+
+    let items: Vec<AuditEntry> = sqlx::query_as(&format!(
+        "SELECT a.id, a.actor_id, u.username AS actor_username, a.action, a.target_kind, \
+         a.target_id, a.detail, a.created_at \
+         FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id \
+         WHERE {filters} ORDER BY a.created_at DESC, a.id DESC LIMIT ?2 OFFSET ?3"
+    ))
+    .bind(action)
+    .bind(per_page)
+    .bind((page - 1) * per_page)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(Page {
+        items,
+        total,
+        page,
+        per_page,
+    }))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct AuditQuery {
+    pub action: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

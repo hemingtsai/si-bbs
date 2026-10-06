@@ -626,3 +626,76 @@ async fn demoted_moderator_cannot_delete_others_post_with_old_token() {
         .await
         .assert_status(axum::http::StatusCode::FORBIDDEN);
 }
+
+/// The audit trail is the only place a privileged action survives the effect it
+/// had: without it, "who demoted this moderator" is unanswerable.
+#[tokio::test]
+async fn privileged_actions_are_recorded_in_the_audit_log() {
+    let (server, pool) = admin_server().await;
+    let admin = admin_token(&server).await;
+    register(&server, "alice").await;
+    let alice_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'alice'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Role change, then ban and unban.
+    server
+        .patch(&format!("/api/admin/users/{alice_id}/role"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "role": "moderator" }))
+        .await
+        .assert_status_ok();
+    for banned in [true, false] {
+        server
+            .patch(&format!("/api/admin/users/{alice_id}/ban"))
+            .add_header("Authorization", format!("Bearer {admin}"))
+            .json(&serde_json::json!({ "banned": banned }))
+            .await
+            .assert_status_ok();
+    }
+
+    let res = server
+        .get("/api/admin/audit")
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["total"], 3);
+
+    // Newest first, and each row says who did it and what changed.
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items[0]["action"], "user.unban");
+    assert_eq!(items[0]["actor_username"], "root");
+    assert_eq!(items[0]["target_id"], alice_id);
+    assert_eq!(items[2]["action"], "user.role_change");
+    assert_eq!(items[2]["detail"], "user → moderator");
+
+    // Filtering by action is exact.
+    let res = server
+        .get("/api/admin/audit?action=user.ban")
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await;
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["action"], "user.ban");
+}
+
+#[tokio::test]
+async fn the_audit_log_is_admin_only() {
+    let (server, pool) = admin_server().await;
+    let mod_token = register_login_as_role(&server, &pool, "mod", "moderator").await;
+    let alice = register_and_login(&server, "alice").await;
+
+    for token in [&mod_token, &alice] {
+        server
+            .get("/api/admin/audit")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await
+            .assert_status(axum::http::StatusCode::FORBIDDEN);
+    }
+    server
+        .get("/api/admin/audit")
+        .await
+        .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+}

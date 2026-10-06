@@ -10,6 +10,7 @@ use crate::models::page::Page;
 use crate::models::project::{Project, ProjectOut, ProjectStatus};
 use crate::models::user::Role;
 use crate::routes::AppState;
+use crate::services::audit;
 use crate::services::github::{self, GithubClient};
 
 /// A README older than this is refreshed on the next detail request.
@@ -279,6 +280,20 @@ pub async fn review(
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+
+    audit::record_best_effort(
+        &state.pool,
+        claims.sub,
+        audit::PROJECT_REVIEW,
+        "project",
+        Some(id),
+        Some(&format!(
+            "{} {}",
+            status.as_str(),
+            note.as_deref().unwrap_or("")
+        )),
+    )
+    .await;
 
     let project = fetch_project(&state, id).await?;
     Ok(Json(project.into()))

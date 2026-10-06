@@ -719,3 +719,62 @@ async fn purging_a_forum_comment_keeps_the_post_and_drops_its_likes() {
         .unwrap();
     assert_eq!((reply, kept, post, likes), (0, 1, 1, 0));
 }
+
+/// Purging is recorded in the same transaction as the delete: the log can never
+/// claim a row was destroyed when the delete rolled back.
+#[tokio::test]
+async fn purging_is_recorded_in_the_audit_log() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let project_id = seed_project(&pool, "alice", "approved", "audited").await;
+
+    server
+        .delete(&format!("/api/projects/{project_id}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    server
+        .delete(&format!("/api/trash/project/{project_id}"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let (action, kind, target): (String, String, i64) = sqlx::query_as(
+        "SELECT action, target_kind, target_id FROM audit_log ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (action.as_str(), kind.as_str(), target),
+        ("trash.purge", "project", project_id)
+    );
+
+    // A restore that a moderator performs on someone else's item is recorded too.
+    let wiki_id = server
+        .post("/api/wiki")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"title":"t","category":"c","content":"x"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .delete(&format!("/api/wiki/page/{wiki_id}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    let mod_token = register_login_as_role(&server, &pool, "mod", "moderator").await;
+    server
+        .post(&format!("/api/trash/wiki/{wiki_id}/restore"))
+        .add_header("Authorization", format!("Bearer {mod_token}"))
+        .await
+        .assert_status_ok();
+
+    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(actions, ["trash.purge", "trash.restore"]);
+}

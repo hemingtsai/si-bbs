@@ -137,7 +137,8 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
             "/api/admin/users/{id}/ban",
             axum::routing::patch(admin::set_ban),
         )
-        .route("/api/admin/stats", get(admin::stats));
+        .route("/api/admin/stats", get(admin::stats))
+        .route("/api/admin/audit", get(admin::list_audit));
 
     // Serve the built SPA when a static directory is available. Unknown paths
     // fall back to index.html so client-side routes survive a refresh.
