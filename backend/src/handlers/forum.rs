@@ -134,6 +134,80 @@ pub async fn create_post(
     Ok((StatusCode::CREATED, Json(fetch_post(&state, id).await?)))
 }
 
+pub async fn get_post(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<ForumPostOut>, AppError> {
+    Ok(Json(fetch_post(&state, id).await?))
+}
+
+/// Author or staff edits. Only title/board content can change.
+pub async fn update_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(input): Json<PostInput>,
+) -> Result<Json<ForumPostOut>, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let (board, title, content) = validate_post(&input)?;
+
+    let owner_id: i64 = sqlx::query_scalar(
+        "SELECT author_id FROM forum_posts WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if owner_id != claims.sub && !is_staff(&claims.role) {
+        return Err(AppError::Forbidden);
+    }
+
+    sqlx::query(
+        "UPDATE forum_posts SET board = ?2, title = ?3, content = ?4, updated_at = CURRENT_TIMESTAMP \
+         WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(board.as_str())
+    .bind(&title)
+    .bind(&content)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(Json(fetch_post(&state, id).await?))
+}
+
+/// Author or staff soft-deletes.
+pub async fn delete_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let owner_id: i64 = sqlx::query_scalar(
+        "SELECT author_id FROM forum_posts WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if owner_id != claims.sub && !is_staff(&claims.role) {
+        return Err(AppError::Forbidden);
+    }
+
+    let res = sqlx::query(
+        "UPDATE forum_posts SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?2 \
+         WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn fetch_post(state: &AppState, id: i64) -> Result<ForumPostOut, AppError> {
     let sql = format!(
         "{POST_SELECT} WHERE p.id = ?1 AND p.deleted_at IS NULL"

@@ -54,6 +54,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/forum/boards", get(forum::boards))
         .route("/api/forum/posts", get(forum::list_posts).post(forum::create_post))
+        .route("/api/forum/posts/{id}", get(forum::get_post).patch(forum::update_post).delete(forum::delete_post))
         // Administration.
         .route("/api/admin/users", get(admin::list_users))
         .route(
