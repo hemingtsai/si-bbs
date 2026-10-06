@@ -44,6 +44,12 @@ pub struct Claims {
     pub exp: usize,
     pub iat: usize,
     pub kind: String, // "access" | "refresh"
+    /// Session epoch, copied from `users.token_version`. Tokens minted before this
+    /// field existed default to 0, which matches the column default, so deploying
+    /// this does not log everybody out while still letting a password change
+    /// invalidate older tokens.
+    #[serde(default)]
+    pub tv: i64,
 }
 
 pub fn issue(
@@ -51,6 +57,7 @@ pub fn issue(
     user_id: i64,
     username: &str,
     role: Role,
+    token_version: i64,
     kind: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
@@ -65,6 +72,7 @@ pub fn issue(
         exp: (now + ttl).timestamp() as usize,
         iat: now.timestamp() as usize,
         kind: kind.to_owned(),
+        tv: token_version,
     };
     encode(
         &Header::default(),
@@ -78,10 +86,11 @@ pub fn issue_pair(
     user_id: i64,
     username: &str,
     role: Role,
+    token_version: i64,
 ) -> Result<(String, String), jsonwebtoken::errors::Error> {
     Ok((
-        issue(cfg, user_id, username, role, "access")?,
-        issue(cfg, user_id, username, role, "refresh")?,
+        issue(cfg, user_id, username, role, token_version, "access")?,
+        issue(cfg, user_id, username, role, token_version, "refresh")?,
     ))
 }
 

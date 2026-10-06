@@ -226,3 +226,107 @@ async fn login_never_reveals_whether_an_account_exists() {
         .await
         .assert_status(axum::http::StatusCode::TOO_MANY_REQUESTS);
 }
+
+/// A password change has to end the sessions that existed before it, or a stolen
+/// token survives exactly the action taken because it was stolen.
+#[tokio::test]
+async fn changing_the_password_invalidates_older_tokens() {
+    let app = common::test_server().await;
+    common::register(&app, "grace").await;
+    let stale = common::login(&app, "grace").await;
+
+    // A second session, e.g. the laptop that is about to change the password.
+    let current = common::login(&app, "grace").await;
+
+    let res = app
+        .post("/api/auth/password")
+        .add_header("Authorization", format!("Bearer {current}"))
+        .json(&json!({"current_password": "password123", "new_password": "brand-new-pass"}))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    let fresh = body["access_token"].as_str().unwrap().to_string();
+
+    // The session that made the change keeps working…
+    app.get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {fresh}"))
+        .await
+        .assert_status_ok();
+    // …while the other one is now refused.
+    app.get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {stale}"))
+        .await
+        .assert_status_unauthorized();
+    app.get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {current}"))
+        .await
+        .assert_status_unauthorized();
+
+    // The old password no longer logs in, the new one does. (`common::login` is
+    // hard-coded to the registration password, so ask directly here.)
+    app.post("/api/auth/login")
+        .json(&json!({"username": "grace", "password": "password123"}))
+        .await
+        .assert_status_unauthorized();
+    app.post("/api/auth/login")
+        .json(&json!({"username": "grace", "password": "brand-new-pass"}))
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
+async fn a_stale_refresh_token_cannot_outlive_a_password_change() {
+    let app = common::test_server().await;
+    common::register(&app, "heidi").await;
+
+    let res = app
+        .post("/api/auth/login")
+        .json(&json!({"username": "heidi", "password": "password123"}))
+        .await;
+    let body = res.json::<serde_json::Value>();
+    let refresh = body["refresh_token"].as_str().unwrap().to_string();
+    let access = body["access_token"].as_str().unwrap().to_string();
+
+    app.post("/api/auth/password")
+        .add_header("Authorization", format!("Bearer {access}"))
+        .json(&json!({"current_password": "password123", "new_password": "another-good-one"}))
+        .await
+        .assert_status_ok();
+
+    // Refreshing with the pre-change token must not mint a working session.
+    app.post("/api/auth/refresh")
+        .json(&json!({"refresh_token": refresh}))
+        .await
+        .assert_status_unauthorized();
+}
+
+#[tokio::test]
+async fn password_change_validates_input_and_the_current_password() {
+    let app = common::test_server().await;
+    common::register(&app, "ivan").await;
+    let token = common::login(&app, "ivan").await;
+    let auth = format!("Bearer {token}");
+
+    // Wrong current password.
+    app.post("/api/auth/password")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"current_password": "not-it", "new_password": "brand-new-pass"}))
+        .await
+        .assert_status_unauthorized();
+    // Too short, and unchanged.
+    app.post("/api/auth/password")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"current_password": "password123", "new_password": "short"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    app.post("/api/auth/password")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"current_password": "password123", "new_password": "password123"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    // Not logged in.
+    app.post("/api/auth/password")
+        .json(&json!({"current_password": "password123", "new_password": "brand-new-pass"}))
+        .await
+        .assert_status_unauthorized();
+}

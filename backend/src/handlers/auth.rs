@@ -85,8 +85,9 @@ pub async fn login(
         return Err(AppError::TooManyRequests { retry_after_secs });
     }
 
-    let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
-        "SELECT id, username, password_hash, role, banned FROM users WHERE username = ?1",
+    let row: Option<(i64, String, String, String, i64, i64)> = sqlx::query_as(
+        "SELECT id, username, password_hash, role, banned, token_version \
+         FROM users WHERE username = ?1",
     )
     .bind(body.username.trim())
     .fetch_optional(&state.pool)
@@ -95,7 +96,7 @@ pub async fn login(
     // Unknown account, wrong password and banned account all spend the same
     // budget: anything else lets an attacker tell the cases apart by watching
     // which one starts returning 429 first.
-    let Some((id, username, hash, role_str, banned)) = row else {
+    let Some((id, username, hash, role_str, banned, token_version)) = row else {
         state.login_limiter.record(&limit_key);
         return Err(AppError::Unauthorized);
     };
@@ -110,7 +111,7 @@ pub async fn login(
 
     state.login_limiter.clear(&limit_key);
     let role = Role::parse(&role_str).unwrap_or(Role::User);
-    let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role)
+    let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role, token_version)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
         "access_token": access,
@@ -142,13 +143,24 @@ pub async fn refresh(
     if privs.banned {
         return Err(AppError::Forbidden);
     }
+    // Same epoch check as `require_auth`: a password change must not be
+    // circumventable by refreshing an older token.
+    if claims.tv != privs.token_version {
+        return Err(AppError::Unauthorized);
+    }
     let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?1")
         .bind(claims.sub)
         .fetch_one(&state.pool)
         .await?;
 
-    let (access, refresh) = auth::issue_pair(&state.cfg, claims.sub, &username, privs.role)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let (access, refresh) = auth::issue_pair(
+        &state.cfg,
+        claims.sub,
+        &username,
+        privs.role,
+        privs.token_version,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({
         "access_token": access,
         "refresh_token": refresh,
@@ -178,5 +190,85 @@ pub async fn me(
         "username": username,
         "role": Role::parse(&role).unwrap_or(Role::User).as_str(),
         "banned": banned != 0,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct PasswordChangeReq {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// Change the caller's own password.
+///
+/// Bumps `users.token_version`, which invalidates every token issued earlier —
+/// including the caller's own. That is the point (a stolen session must not
+/// survive the password change), so a fresh pair is returned for the caller to
+/// keep working, and the frontend swaps it in.
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PasswordChangeReq>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state, &headers).await?;
+    validate::password(&body.new_password).map_err(AppError::BadRequest)?;
+    if body.new_password == body.current_password {
+        return Err(AppError::BadRequest(
+            "the new password must differ from the current one".into(),
+        ));
+    }
+
+    let row: Option<(String, String, i64)> =
+        sqlx::query_as("SELECT password_hash, role, token_version FROM users WHERE id = ?1")
+            .bind(claims.sub)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (hash, role_str, token_version) = row.ok_or(AppError::Unauthorized)?;
+    if !auth::verify_password(&body.current_password, &hash) {
+        // Same budget as a failed login: verifying a password here is just as
+        // useful to an attacker holding a stolen token.
+        let key = format!("pwchange:{}", claims.sub);
+        if let Some(retry_after_secs) = state.login_limiter.retry_after(&key) {
+            return Err(AppError::TooManyRequests { retry_after_secs });
+        }
+        state.login_limiter.record(&key);
+        return Err(AppError::Unauthorized);
+    }
+    state
+        .login_limiter
+        .clear(&format!("pwchange:{}", claims.sub));
+
+    let new_hash = auth::hash_password(&body.new_password)
+        .await
+        .map_err(AppError::Internal)?;
+    let next_version = token_version + 1;
+    sqlx::query(
+        "UPDATE users SET password_hash = ?2, token_version = ?3, \
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+    )
+    .bind(claims.sub)
+    .bind(&new_hash)
+    .bind(next_version)
+    .execute(&state.pool)
+    .await?;
+
+    let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?1")
+        .bind(claims.sub)
+        .fetch_one(&state.pool)
+        .await?;
+    let role = Role::parse(&role_str).unwrap_or(Role::User);
+    let (access, refresh) = auth::issue_pair(&state.cfg, claims.sub, &username, role, next_version)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    tracing::info!(
+        user_id = claims.sub,
+        "password changed; older tokens invalidated"
+    );
+    Ok(Json(serde_json::json!({
+        "access_token": access,
+        "refresh_token": refresh,
+        "role": role.as_str(),
+        "user_id": claims.sub,
+        "username": username,
     })))
 }

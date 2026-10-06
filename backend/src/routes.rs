@@ -71,6 +71,7 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/refresh", post(auth::refresh))
         .route("/api/auth/me", get(auth::me))
+        .route("/api/auth/password", post(auth::change_password))
         // Wiki.
         .route("/api/wiki", get(wiki::list).post(wiki::create))
         .route("/api/wiki/mine", get(wiki::mine))

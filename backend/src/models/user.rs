@@ -56,6 +56,8 @@ impl User {
 pub struct Privileges {
     pub role: Role,
     pub banned: bool,
+    /// Session epoch; see `services::auth::Claims::tv`.
+    pub token_version: i64,
 }
 
 /// `None` when the user no longer exists.
@@ -63,13 +65,15 @@ pub async fn current_privileges(
     pool: &sqlx::SqlitePool,
     user_id: i64,
 ) -> Result<Option<Privileges>, crate::error::AppError> {
-    let row: Option<(String, i64)> = sqlx::query_as("SELECT role, banned FROM users WHERE id = ?1")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.map(|(role, banned)| Privileges {
+    let row: Option<(String, i64, i64)> =
+        sqlx::query_as("SELECT role, banned, token_version FROM users WHERE id = ?1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(role, banned, token_version)| Privileges {
         // An unrecognised role string must never widen access.
         role: Role::parse(&role).unwrap_or(Role::User),
         banned: banned != 0,
+        token_version,
     }))
 }

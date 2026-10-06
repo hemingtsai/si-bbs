@@ -27,6 +27,11 @@ pub async fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<auth:
     if privs.banned {
         return Err(AppError::Forbidden);
     }
+    // A password change bumps the epoch, which invalidates every token issued
+    // before it — including this one.
+    if claims.tv != privs.token_version {
+        return Err(AppError::Unauthorized);
+    }
     claims.role = privs.role.as_str().to_string();
     Ok(claims)
 }
