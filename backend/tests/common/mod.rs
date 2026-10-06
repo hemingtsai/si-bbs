@@ -69,6 +69,11 @@ pub fn test_config(github_api_base: &str) -> Config {
             .to_string_lossy()
             .into_owned(),
         cookie_secure: false,
+        // Most tests are about something else and would only be slowed down by
+        // solving a challenge first; the proof-of-work path has its own tests (see
+        // `tests/pow_test.rs`) that turn it on.
+        pow_required: false,
+        pow_difficulty: si_bbs_backend::services::pow::DEFAULT_DIFFICULTY,
         max_upload_bytes: 5 * 1024 * 1024,
     }
 }

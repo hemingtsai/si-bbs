@@ -5,6 +5,7 @@ pub mod diff;
 pub mod feed;
 pub mod github;
 pub mod password_reset;
+pub mod pow;
 pub mod public_url;
 pub mod ratelimit;
 pub mod reports;

@@ -823,6 +823,11 @@ async fn github_token_is_sent_when_configured() {
             .to_string_lossy()
             .into_owned(),
         cookie_secure: false,
+        // Most tests are about something else and would only be slowed down by
+        // solving a challenge first; the proof-of-work path has its own tests (see
+        // `tests/pow_test.rs`) that turn it on.
+        pow_required: false,
+        pow_difficulty: 14,
         max_upload_bytes: 5 * 1024 * 1024,
     };
     let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState::new(pool, cfg));

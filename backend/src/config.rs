@@ -27,6 +27,16 @@ pub struct Config {
     /// Mark the session cookies `Secure`. Off by default so plain-http local
     /// development works; a deployment behind TLS should set `COOKIE_SECURE=true`.
     pub cookie_secure: bool,
+    /// Require a proof-of-work solution on registration, login, posting, commenting
+    /// and password-reset requests.
+    ///
+    /// On by default: a deployment that forgets to configure it is the one that gets
+    /// spammed, and the frontend ships the solver. Set `POW_REQUIRED=false` for API
+    /// clients that cannot run it.
+    pub pow_required: bool,
+    /// Leading zero bits the client has to produce. Each extra bit doubles the
+    /// client's work.
+    pub pow_difficulty: u32,
 }
 
 /// Decide which JWT secret the process is allowed to run with.
@@ -102,6 +112,17 @@ impl Config {
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             public_base_url: env::var("PUBLIC_BASE_URL").unwrap_or_default(),
             upload_dir: env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".into()),
+            pow_required: !matches!(
+                env::var("POW_REQUIRED")
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "0" | "false" | "no"
+            ),
+            pow_difficulty: env::var("POW_DIFFICULTY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(crate::services::pow::DEFAULT_DIFFICULTY),
             cookie_secure: matches!(
                 env::var("COOKIE_SECURE")
                     .unwrap_or_default()

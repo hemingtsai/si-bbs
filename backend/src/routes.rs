@@ -33,6 +33,9 @@ pub struct AppState {
     pub register_limiter: Arc<RateLimiter>,
     /// Reports one account may file per hour.
     pub report_limiter: Arc<RateLimiter>,
+    /// Proof-of-work challenges that have already been spent, so a solved challenge
+    /// cannot be replayed across requests.
+    pub spent_challenges: Arc<crate::services::pow::spent::Spent>,
 }
 
 impl AppState {
@@ -52,6 +55,7 @@ impl AppState {
                 ratelimit::REPORT_MAX_ATTEMPTS,
                 ratelimit::REPORT_WINDOW,
             )),
+            spent_challenges: Arc::new(crate::services::pow::spent::Spent::new()),
         }
     }
 }
