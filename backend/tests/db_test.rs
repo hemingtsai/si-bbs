@@ -183,3 +183,63 @@ async fn the_bundled_sqlite_has_fts5_with_the_trigram_tokenizer() {
         .unwrap();
     assert_eq!(hits, 1, "trigram search failed on CJK");
 }
+
+/// Rows written by an older version must keep working after the later migrations add
+/// columns: every statement that predates them omits the new fields.
+#[tokio::test]
+async fn rows_that_predate_the_new_columns_still_work() {
+    let pool = common::test_pool().await;
+
+    // A user as the original schema wrote it: no display_name/bio/avatar_url, no
+    // token_version.
+    sqlx::query("INSERT INTO users (username, email, password_hash) VALUES ('legacy', 'l@x', 'h')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A wiki page as `create` wrote it before revisions existed: no slug alias, and
+    // the revision column gets its default.
+    sqlx::query(
+        "INSERT INTO wiki_pages (title, slug, category, content, status, author_id) \
+         VALUES ('老页面', 'legacy-page', 'c', '老正文', 'published', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The added columns read back as their defaults rather than failing the join.
+    let (display_name, token_version): (Option<String>, i64) =
+        sqlx::query_as("SELECT display_name, token_version FROM users WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(display_name, None);
+    assert_eq!(token_version, 0);
+
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM wiki_pages WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // The migration set it for rows that existed when it ran; an insert afterwards
+    // gets the column default, and the risk is that the *code* assumes 1.
+    assert!(revision >= 0);
+
+    // A page without a history row must not break the history endpoints: the list is
+    // simply empty instead of erroring.
+    let revisions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM wiki_revisions WHERE page_id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(revisions, 0);
+
+    // The FTS triggers pick this insert up. Rows that predate the index are covered
+    // by the `INSERT INTO wiki_fts ... SELECT` backfill at the end of migration 022 —
+    // the one part that cannot be exercised from here, because this database already
+    // has every migration applied.
+    let hits: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM wiki_fts WHERE wiki_fts MATCH '老正文'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(hits, 1);
+}
