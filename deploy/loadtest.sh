@@ -1,23 +1,35 @@
 #!/bin/sh
-# Smoke load test against a running SI BBS instance.
+# Load test against a running SI BBS instance.
 #
-#   oha -c 64 -n 20000 --latency-correction http://localhost:3000/api/health
+#   deploy/loadtest.sh http://localhost:3000
 #
-# We ship a small script because not every deploy host has oha installed. Any
-# of these work:
-#   * oha  (https://github.com/hatoo/oha)
-#   * ab   (ApacheBench):    ab -n 20000 -c 64 http://localhost:3000/api/health
-#   * k6:                    k6 run deploy/k6.js
+# Overridable: BASE (positional arg), PATH (default /api/projects),
+# N (requests, default 2000), C (concurrency, default 64).
+#
+# Prefers k6 because it is the only runner here that *asserts* anything: the
+# thresholds in deploy/k6.js (p95 < 250ms, failure rate < 1%) fail the run, which
+# is what a CI job needs. `oha` and `ab` only print numbers — both exit 0 even
+# when every request failed — so treat their output as data, not as a verdict.
 set -eu
 BASE="${1:-http://localhost:3000}"
+PATHNAME="${PATHNAME:-/api/projects}"
 N="${N:-2000}"
 C="${C:-64}"
 
-if command -v oha >/dev/null 2>&1; then
-    exec oha -c "$C" -n "$N" --latency-correction "$BASE/api/projects"
-elif command -v ab >/dev/null 2>&1; then
-    exec ab -n "$N" -c "$C" "$BASE/api/projects"
-else
-    echo "install oha or apachebench for a real load test" >&2
-    exit 1
+if command -v k6 >/dev/null 2>&1; then
+    echo "k6 (thresholds enforced): $C VUs against $BASE$PATHNAME" >&2
+    BASE="$BASE" VUS="$C" exec k6 run "$(dirname "$0")/k6.js"
 fi
+
+if command -v oha >/dev/null 2>&1; then
+    echo "oha: ${N} requests, ${C} concurrent, against $BASE$PATHNAME" >&2
+    exec oha -c "$C" -n "$N" --latency-correction "$BASE$PATHNAME"
+fi
+
+if command -v ab >/dev/null 2>&1; then
+    echo "ab: ${N} requests, ${C} concurrent, against $BASE$PATHNAME" >&2
+    exec ab -n "$N" -c "$C" "$BASE$PATHNAME"
+fi
+
+echo "install k6 (preferred), oha or apachebench to run a load test" >&2
+exit 1

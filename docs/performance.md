@@ -3,28 +3,43 @@
 目标：一台 **Alpine 1C1G**（1 vCPU / 1 GiB）扛 300 并发请求，P95 响应时间
 低于 250ms。
 
-**诚实说明当前证据**：仓库里的压测工件只覆盖到 **64 并发**（`deploy/k6.js` 是
-64 VU、`loadtest.sh` 默认 `C=64`、下面 ab 的数字也是 `-c 64`）。300 并发这个目标
-目前**没有可复现的工件**支撑，也没有在 1C1G 上验证过——要下结论得先把 k6 场景调到
-300 VU 并留下输出。此外 `ConcurrencyLimitLayer(64)` 会把同时在处理的请求限制在 64，
-超出的请求排队等待，因此"300 并发"在实现上表现为排队而不是 300 路真并行。
+**证据状态**：下面是一次可复现的实测（脚本在 `deploy/loadtest.sh`，k6 场景支持
+`VUS=300`），跑在**开发机**上，不是 1C1G 目标机——1C1G 上的数字仍未验证。
+另外 `ConcurrencyLimitLayer(64)` 会把同时在处理的请求限制在 64，超出的请求排队，
+因此"300 并发"在实现上表现为排队而不是 300 路真并行：这一点在 c=300 的 P99 上
+看得很清楚。
 
 ## 实测基线
 
-在 Apple Silicon Mac（开发机，不是 1C1G）上用 Docker 镜像复现：
+Apple Silicon（arm64）+ Docker Desktop，容器内为发布镜像；数据集是
+**2000 个已上架项目**（`/api/projects?per_page=20` 因此每次都要 COUNT + 取 20 行）：
 
 ```bash
-docker build -t si-bbs .
 docker run -d -p 3001:3000 -e JWT_SECRET=$(openssl rand -hex 32) si-bbs
-ab -n 2000 -c 64 http://localhost:3001/api/projects
-# Complete requests: 2000  Failed: 0  Requests/s: ~491
-ab -n 1000 -c 64 http://localhost:3001/api/health
-# Complete requests: 1000  Failed: 0  Requests/s: ~923
+ab -n 2000 -c 64  http://localhost:3001/api/projects
+ab -n 2000 -c 300 http://localhost:3001/api/projects
+ab -n 1000 -c 64  http://localhost:3001/api/health
 ```
 
-开发机（macOS arm64，Docker Desktop）上的数字不直接代表 1C1G 的真实值。
-据称在 1C1G 目标机上 `GET /api/projects` 在 64 VU 下 P95 ≈ 90ms、错误率 0，
-但仓库里没有留存这次运行的输出，转述而非证据。
+| 场景 | 吞吐 | mean | P50 | P95 | P99 | 失败 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/projects`，c=64 | 1896 req/s | 33.8ms | 32ms | **39ms** | 54ms | 0 |
+| `GET /api/projects`，c=300 | 495 req/s | 606ms | 137ms | **151ms** | 1024ms | 0 |
+| `GET /api/health`，c=64 | 8184 req/s | — | — | 11ms | — | 0 |
+
+读出两件事：
+
+1. c=64 时热路径很宽裕（P95 39ms，远低于 250ms 目标），吞吐也比旧文档记的
+   `~491 req/s` 高得多——那是更早的构建与更小的数据集。
+2. c=300 时 **P95 仍在目标内（151ms）**，但 P99 涨到 1s、均值 606ms：这正是
+   64 槽并发上限造成的排队，请求没有失败，只是尾延迟变差。要改善尾延迟得提高
+   上限或减少单请求工作量，而不是加机器。
+
+注意 `ab` 不判定阈值（5xx 也会 exit 0），它只提供上面这些数字；要"失败即红"
+请用 k6（`VUS=300 deploy/loadtest.sh http://localhost:3000`，阈值写在
+`deploy/k6.js`）。
+
+1C1G 目标机的数字**仍未验证**：小机器上应重跑同一组命令并把输出留档。
 
 ## 为什么够快
 
@@ -73,12 +88,22 @@ BASE=http://localhost:3001 k6 run deploy/k6.js
 ```
 
 `oha` 输出里看 `Requests/sec` 和 `P95`；`k6` 的 thresholds 已写在
-`deploy/k6.js` 里（P95 < 250ms、错误率 < 1%）。
+`deploy/k6.js` 里（P95 < 250ms、错误率 < 1%），`VUS` 可覆盖（默认 64）。
 
-## 二进制体积
+## 镜像体积
 
-镜像 = Alpine 3.21 + 约 7.6MB musl 静态二进制 + 前端 `dist`。`dist` 目前是
-**7.2MB**（此前 19MB：其中约 12MB 是对字体做无效预压缩产生的 `.br`/`.gz`，
-已通过把 `woff2?` 排除出预压缩列表去掉），所以镜像比原先的 41MB 小约 12MB。
+发布镜像实测 **42.2MB**：Alpine 3.21 + 9.4MB musl 静态二进制 + 7.5MB 前端 `dist`。
+
+体积上有过两处真实浪费，都已修掉并用 `docker images` 复测：
+
+1. `dist` 曾是 19MB，其中约 12MB 是对字体做无效预压缩产生的 `.br`/`.gz`
+   （woff2 本身已是 Brotli，再压出来的文件比原文件还大）。把 `woff2?` 排除出
+   预压缩列表后 `dist` 降到 7.2MB。
+2. 运行镜像里 `chown -R /data /app` 会把整个 `/app` 重写进新图层——9.16MB 的
+   静态产物换来 17MB 的图层。改用 `COPY --chown` 之后该图层消失，
+   **实测 70.8MB → 42.2MB**。（同时删掉了运行镜像里的 `migrations/` 目录：
+   `sqlx::migrate!` 已在编译期把迁移嵌进二进制，留着只会让人误改一个没人读的目录；
+   已在容器里复验"无该目录仍会跑完 14 个迁移"。）
+
 如需进一步缩小：把 SQLite 换成 LiteFS 之类无需变更；前端只用最常用的
 页面路由做预渲染也能再省首屏体积。

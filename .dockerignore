@@ -8,3 +8,17 @@ docs
 *.db-wal
 *.db-shm
 .env
+.env.*
+# E2E and unit-test material is never needed to build the image.
+frontend/e2e
+frontend/tests
+frontend/test-results
+frontend/playwright-report
+frontend/blob-report
+.playwright
+.github
+# Never ship credentials or certificates in the build context.
+*.pem
+*.key
+*.p12
+*.crt

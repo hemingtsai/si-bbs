@@ -26,13 +26,19 @@ RUN cargo build --release
 FROM alpine:3.21
 RUN adduser -D -u 10001 sibbs
 WORKDIR /app
-COPY --from=backend /app/backend/target/release/si-bbs-backend /app/si-bbs-backend
-COPY backend/migrations ./migrations
-COPY --from=frontend /app/frontend/dist ./static
+# `--chown` instead of a later `chown -R /data /app`: recursively chowning the
+# application directory rewrites every file into a new layer, which cost ~2x the
+# static payload (17MB for a 7.5MB bundle). Copying with the right owner costs
+# nothing extra.
+COPY --from=backend --chown=sibbs:sibbs /app/backend/target/release/si-bbs-backend /app/si-bbs-backend
+COPY --from=frontend --chown=sibbs:sibbs /app/frontend/dist ./static
+# The migrations are embedded into the binary by `sqlx::migrate!` at compile time,
+# so shipping the directory too would only invite editing files that nothing reads.
 ENV STATIC_DIR=/app/static \
     DATABASE_URL=sqlite:///data/si-bbs.db?mode=rwc \
     RUST_LOG=si_bbs_backend=info,tower_http=info
-RUN mkdir -p /data && chown -R sibbs:sibbs /data /app
+# Only the data volume needs an owner; a named volume inherits it on first use.
+RUN mkdir -p /data && chown sibbs:sibbs /data
 USER sibbs
 EXPOSE 3000
 VOLUME ["/data"]
