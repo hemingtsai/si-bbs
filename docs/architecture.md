@@ -57,9 +57,11 @@ README 和 wiki 页面直接存 Markdown 源文，后端永不生成 HTML。前�
 
 **2. README 懒刷新，不定时同步。**
 历史版本曾对所有已收项目定时刷 GitHub，在小机器上是纯浪费。现在只在
-`GET /api/projects/{id}` 时检查 `readme_fetched_at`，超过 24 小时才重新抓取；
-失败则保留旧缓存并更新时间戳，把"GitHub 宕机"和"没有 README"区分处理——前者
-保留缓存，后者清空缓存。
+`GET /api/projects/{id}` 时检查 `readme_fetched_at`，超过 24 小时才重新抓取。
+两个时间戳分工不同：`readme_fetched_at` 只由**成功**的抓取推进（它回答"这份
+文档有多旧"），`readme_attempted_at` 记录**每一次尝试**，失败后 10 分钟内不再
+重试同一个项目——否则 GitHub 宕机期间每个详情请求都要等一次上游超时。
+"GitHub 宕机"与"仓库没有 README"仍然区分处理：前者保留缓存，后者清空缓存。
 
 **3. 权限判断以数据库为准。**
 `require_role` 先验 JWT，再查一次 `users.role/banned`。这样隐式地把两个安全

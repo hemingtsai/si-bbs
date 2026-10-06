@@ -49,6 +49,8 @@ pub struct Project {
     pub reviewed_by: Option<i64>,
     pub review_note: Option<String>,
     pub readme_fetched_at: Option<NaiveDateTime>,
+    /// Last refresh attempt, successful or not. Drives the failure backoff.
+    pub readme_attempted_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -94,6 +96,7 @@ pub struct ProjectOut {
     pub reviewed_by: Option<i64>,
     pub review_note: Option<String>,
     pub readme_fetched_at: Option<NaiveDateTime>,
+    pub readme_attempted_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -120,6 +123,7 @@ impl From<Project> for ProjectOut {
             reviewed_by: p.reviewed_by,
             review_note: p.review_note,
             readme_fetched_at: p.readme_fetched_at,
+            readme_attempted_at: p.readme_attempted_at,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }

@@ -622,6 +622,79 @@ async fn detail_keeps_stale_readme_when_github_fails() {
     assert!(ts.is_some());
 }
 
+/// Regression: the failure path kept the cached README but recorded nothing, so
+/// every later detail request for a stale project made another upstream call —
+/// each waiting up to the client's 8s timeout. One failure must now buy a quiet
+/// window instead of a request per page view.
+#[tokio::test]
+async fn a_failed_refresh_backs_off_instead_of_calling_github_per_request() {
+    let gh = mock_github("# cached readme").await;
+    let (server, pool) = test_ctx_with_github(&gh.uri()).await;
+    let alice = register_and_login(&server, "alice").await;
+
+    let res = submit(
+        &server,
+        &alice,
+        "https://github.com/BurntSushi/ripgrep",
+        "dev-tools",
+    )
+    .await;
+    let id = res.json::<serde_json::Value>()["id"].as_i64().unwrap();
+    sqlx::query(
+        "UPDATE projects SET status = 'approved', readme_fetched_at = datetime('now', '-48 hours'), \
+         readme_attempted_at = NULL WHERE id = ?1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let fetched_before: Option<String> =
+        sqlx::query_scalar("SELECT readme_fetched_at FROM projects WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // GitHub is down.
+    let broken = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&broken)
+        .await;
+    let server2 = common::server_with(pool.clone(), &broken.uri());
+
+    for attempt in 1..=3 {
+        let res = server2.get(&format!("/api/projects/{id}")).await;
+        res.assert_status_ok();
+        assert_eq!(
+            res.json::<serde_json::Value>()["readme_raw"],
+            "# cached readme"
+        );
+        assert_eq!(
+            broken.received_requests().await.unwrap().len(),
+            1,
+            "attempt {attempt} hit GitHub again instead of backing off"
+        );
+    }
+
+    // The document is still as old as it was: a failed fetch is not a refresh.
+    let fetched_after: Option<String> =
+        sqlx::query_scalar("SELECT readme_fetched_at FROM projects WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(fetched_before, fetched_after);
+    // …but the attempt is on record, which is what throttles the retries.
+    let attempted: Option<String> =
+        sqlx::query_scalar("SELECT readme_attempted_at FROM projects WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(attempted.is_some(), "the failed attempt was not recorded");
+}
+
 #[tokio::test]
 async fn detail_clears_readme_when_repo_has_none() {
     let gh = mock_github("# cached readme").await;

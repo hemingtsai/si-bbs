@@ -15,9 +15,15 @@ use crate::services::github::{self, GithubClient};
 /// A README older than this is refreshed on the next detail request.
 const README_TTL_HOURS: i64 = 24;
 
+/// After a failed refresh, wait this long before trying the same project again.
+/// Without it a GitHub outage meant every detail request paid another upstream
+/// timeout: the failure path kept the cached document but never recorded that it
+/// had tried.
+const README_RETRY_MINUTES: i64 = 10;
+
 const PROJECT_COLUMNS: &str = "id, name, github_url, owner, repo, description, readme_raw, \
      language, stars, forks, license, topics, category, status, submitted_by, reviewed_by, \
-     review_note, readme_fetched_at, created_at, updated_at";
+     review_note, readme_fetched_at, readme_attempted_at, created_at, updated_at";
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitInput {
@@ -358,14 +364,27 @@ pub async fn fetch_public_project(state: &AppState, id: i64) -> Result<Project, 
     Ok(project)
 }
 
-/// Refresh `readme_raw` when the cache is older than 24h. Returns whether the
-/// stored copy changed. GitHub errors are logged and the stale copy is kept.
+/// Refresh `readme_raw` when the cached copy is older than [`README_TTL_HOURS`].
+/// Returns whether the stored copy changed.
+///
+/// Two independent timestamps decide the work: `readme_fetched_at` says how old
+/// the document is (only advanced by a successful fetch), while
+/// `readme_attempted_at` throttles retries after a failure. GitHub errors are
+/// logged and the stale copy is kept.
 async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> bool {
+    let now = Utc::now().naive_utc();
     let stale = match project.readme_fetched_at {
         None => true,
-        Some(ts) => Utc::now().naive_utc() - ts > Duration::hours(README_TTL_HOURS),
+        Some(ts) => now - ts > Duration::hours(README_TTL_HOURS),
     };
     if !stale {
+        return false;
+    }
+    // Back off: a project whose last attempt failed recently must not send another
+    // request upstream, or an outage turns every page view into an 8s timeout.
+    if let Some(attempted) = project.readme_attempted_at
+        && now - attempted < Duration::minutes(README_RETRY_MINUTES)
+    {
         return false;
     }
 
@@ -384,8 +403,8 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
     match client.fetch_readme(&repo_ref).await {
         Ok(Some(readme)) => {
             let res = sqlx::query(
-                "UPDATE projects SET readme_raw = ?2, readme_fetched_at = CURRENT_TIMESTAMP \
-                 WHERE id = ?1",
+                "UPDATE projects SET readme_raw = ?2, readme_fetched_at = CURRENT_TIMESTAMP, \
+                 readme_attempted_at = CURRENT_TIMESTAMP WHERE id = ?1",
             )
             .bind(project.id)
             .bind(&readme)
@@ -397,14 +416,15 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
             }
             project.readme_raw = Some(readme);
             project.readme_fetched_at = Some(Utc::now().naive_utc());
+            project.readme_attempted_at = project.readme_fetched_at;
             true
         }
         Ok(None) => {
             // The repo has no README any more: drop the stale copy instead of
             // serving a document that no longer exists upstream.
             if let Err(e) = sqlx::query(
-                "UPDATE projects SET readme_raw = NULL, readme_fetched_at = CURRENT_TIMESTAMP \
-                 WHERE id = ?1",
+                "UPDATE projects SET readme_raw = NULL, readme_fetched_at = CURRENT_TIMESTAMP, \
+                 readme_attempted_at = CURRENT_TIMESTAMP WHERE id = ?1",
             )
             .bind(project.id)
             .execute(&state.pool)
@@ -415,10 +435,24 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
             }
             project.readme_raw = None;
             project.readme_fetched_at = Some(Utc::now().naive_utc());
+            project.readme_attempted_at = project.readme_fetched_at;
             true
         }
         Err(e) => {
             tracing::warn!(project_id = project.id, error = %e, "readme refresh failed, keeping cache");
+            // Record the attempt even though nothing was refreshed, so the next
+            // request within the retry window skips the upstream call.
+            if let Err(e) = sqlx::query(
+                "UPDATE projects SET readme_attempted_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            )
+            .bind(project.id)
+            .execute(&state.pool)
+            .await
+            {
+                tracing::warn!(project_id = project.id, error = %e, "readme attempt write failed");
+            } else {
+                project.readme_attempted_at = Some(Utc::now().naive_utc());
+            }
             false
         }
     }
