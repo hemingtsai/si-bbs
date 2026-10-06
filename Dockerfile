@@ -39,7 +39,10 @@ ENV STATIC_DIR=/app/static \
     UPLOAD_DIR=/data/uploads \
     RUST_LOG=si_bbs_backend=info,tower_http=info
 # Only the data volume needs an owner; a named volume inherits it on first use.
-RUN mkdir -p /data/uploads && chown sibbs:sibbs /data
+# `-R` matters: creating the directory and then chowning only /data left
+# /data/uploads owned by root, and the app (uid 10001) could not write to it — the
+# upload endpoint answered 500 in the running container.
+RUN mkdir -p /data/uploads && chown -R sibbs:sibbs /data
 USER sibbs
 EXPOSE 3000
 VOLUME ["/data"]

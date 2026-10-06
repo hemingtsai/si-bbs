@@ -56,7 +56,7 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 | `GITHUB_TOKEN` | 空 | GitHub API 令牌，提高限速（可选但推荐） |
 | `GITHUB_API_BASE` | `https://api.github.com` | 测试/代理时覆盖 |
 | `COOKIE_SECURE` | `false` | 会话 cookie 是否加 `Secure`。**生产走 TLS 时应设为 `true`**；本地 http 保持 `false`，否则浏览器不会回传 cookie |
-| `UPLOAD_DIR` | `./uploads`（镜像内 `/data/uploads`） | 附件落盘目录。**必须与数据库同卷**，否则重建容器会丢文件 |
+| `UPLOAD_DIR` | `./uploads`（镜像内 `/data/uploads`） | 附件落盘目录。**必须与数据库同卷**，否则重建容器会丢文件。进程以 uid 10001 运行，目录必须对它可写；启动时会做一次写探测，不可写会打 ERROR（容器实测踩过：镜像只 chown 了 `/data` 而漏了 `/data/uploads`，上传会 500） |
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单个附件大小上限 |
 | `STATIC_DIR` | (未设置则不对外服务静态文件) | 前端产物目录，镜像内为 `/app/static` |
 | `RUST_LOG` | `si_bbs_backend=info,tower_http=info` | tracing 过滤 |

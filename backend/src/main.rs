@@ -5,6 +5,35 @@ use si_bbs_backend::{config::Config, db, routes::AppState};
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+/// Say something *before* the first upload fails.
+///
+/// A directory that exists but is not writable by this process is the classic
+/// container mistake (an image that chowns the parent but not the child), and the
+/// only symptom otherwise is a 500 on the first upload — which may be days later.
+/// This does not abort: content still works without attachments.
+fn check_upload_dir(dir: &str) {
+    let path = std::path::Path::new(dir);
+    if let Err(err) = std::fs::create_dir_all(path) {
+        tracing::error!(
+            dir,
+            error = %err,
+            "upload directory is unusable; attachment uploads will fail with 500"
+        );
+        return;
+    }
+    let probe = path.join(".write-probe");
+    match std::fs::write(&probe, b"ok") {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+        }
+        Err(err) => tracing::error!(
+            dir,
+            error = %err,
+            "upload directory is not writable by this process; attachment uploads will fail"
+        ),
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
@@ -15,6 +44,7 @@ async fn main() {
         .init();
 
     let cfg = Config::from_env();
+    check_upload_dir(&cfg.upload_dir);
     let pool = db::connect(&cfg.database_url)
         .await
         .expect("connect sqlite");

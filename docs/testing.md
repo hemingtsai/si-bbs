@@ -15,21 +15,26 @@ cargo test --test project_test
 SQLite 用 `:memory:`，每个测试一份库。GitHub 请求通过 `GITHUB_API_BASE`
 指向 `wiremock` 起的 mock 服务器，不打真实 GitHub。
 
-测试文件与覆盖范围（当前共 138 条：`cargo test` 逐二进制计数）：
+测试文件与覆盖范围（当前共 232 条：`cargo test` 逐二进制计数）：
 
 | 文件 | 覆盖 |
 | --- | --- |
 | `tests/auth_test.rs` | 注册 201、登录、错误密码 401、重复注册 409、未登录 401；大小写重复 409、用户名/邮箱/密码边界 400、登录失败限流 429 与 `Retry-After`、成功登录清零配额 |
 | `tests/project_test.rs` | URL 解析、提交、去重 409、审核队列、README 24h 懒刷新与失败回退、token 透传 |
 | `tests/rating_comment_test.rs` | 评分 upsert/越界 400、评论发布/空白 400、软删除后列表不可见 |
-| `tests/wiki_test.rs` | slug 生成与去重、草稿可见性、作者/staff 权限、软删除 |
+| `tests/wiki_test.rs` | slug 生成与去重、显式 slug 校验与旧 slug 别名、草稿可见性、作者/staff 权限、软删除、版本历史的 CAS 并发、回滚追加而非改写、逐行差异与草稿可见性 |
 | `tests/forum_test.rs` | 板块、免审核发帖/回帖、编辑删除权限、精选排序、板规；并发点赞计数一致性、回复计数派生 |
 | `tests/trash_test.rs` | 软删除进回收站、恢复、权限、admin 才能彻底删除、唯一键占用；有评论/评分/回复时的级联彻底删除 |
-| `tests/admin_test.rs` | 用户列表分页/搜索、改角色即时生效、refresh 不复活旧角色、封禁、统计计数 |
-| `tests/db_test.rs` | 迁移能跑完、表结构齐全、计数列已删除、回收站视图聚合五种 kind、测试库强制外键 |
+| `tests/admin_test.rs` | 用户列表分页/搜索、改角色即时生效、refresh 不复活旧角色、封禁、统计计数、审计日志（改角色/封禁留痕、按动作过滤、仅 admin 可读） |
+| `tests/db_test.rs` | 迁移能跑完、表结构齐全、计数列已删除、回收站视图聚合六种 kind、测试库强制外键、**FTS5 与 trigram 分词器可用**、老数据行在新列下仍可读 |
 | `tests/static_files_test.rs` | SPA 深链回退、`/assets/*` immutable 缓存、安全头、JSON 404、预压缩件按 `Accept-Encoding` 送达 |
 | `tests/compression_test.rs` | 大 JSON 响应即时压缩并带 `Vary`、小响应不压、`identity` 客户端不压 |
 | `tests/health_test.rs` | `/api/health` 正常 200、数据库不可用时 503 |
+| `tests/feed_test.rs` | 全站/分栏 RSS：XML 转义、绝对链接、草稿与软删不出现、wiki 用 slug 链接 |
+| `tests/reports_test.rs` | 举报入队与幂等、只接受公开存活目标、版主处理与 409、删内容自动结案、刷量 429、筛选 |
+| `tests/search_test.rs` | FTS5 三来源检索、中文子串与中段子串、两字回落 LIKE、通配符当字面量、只返回公开内容、分页确定性、编辑后索引跟随 |
+| `tests/attachments_test.rs` | 上传与 markdown 片段、响应头、谎报类型/超限/空文件/字段缺失/未登录全拒、路径穿越无效、越权删除 403、mod 删除进回收站 |
+| `tests/cookies_test.rs` | 登录下发三个 cookie 的属性、仅凭 cookie 认证、伪造 cookie 401、CSRF 头缺失/错误 403、GET 与 Bearer 豁免、仅凭 refresh cookie 轮换、logout 清空、改密码后新 cookie 生效 |
 
 ## 2. 前端单元测试（Vitest）
 
@@ -38,7 +43,10 @@ cd frontend
 npm run test:unit
 ```
 
-覆盖：`auth` Pinia store（登录态、登出、stale role 覆盖）、Markdown 渲染
+覆盖：`auth` Pinia store（登录态由服务端确认、登出会请求服务端、失败也本地登出、
+`ensureSession` 每次页面加载只问一次、`fetchMe` 同时缓存 `user_id`、stale role 覆盖）、
+`api/axios`（cookie 会话下不写任何本地 token、`clearProfileCache` 保留无关 key、
+`readCookie` 只读指定 cookie、`refreshAccessToken` 不落盘）、Markdown 渲染
 （XSS 过滤、代码高亮、未知语言转义）、DOMPurify 配置。
 
 ## 3. 前端端到端（Playwright）
@@ -56,6 +64,7 @@ npm run test:e2e
 | --- | --- | --- |
 | `forum.e2e.ts` | HTTP 接口 | 免审核发帖/回帖、点赞切换、删帖权限（作者/他人 403/版主 204）、精选排序、板规 |
 | `ui.forum.e2e.ts` | **真实浏览器** | 注册→登录→发帖→点赞→回复→列表计数全链路；未登录访客看不到点赞/回复入口；作者在页面上删帖后列表消失；被提权为版主后刷新才出现审核入口与精选按钮 |
+| `ui.profile.e2e.ts` | **真实浏览器** | 个人设置（昵称/改密码/改邮箱/我的举报）、**会话只在 httpOnly cookie 里**（localStorage 无 token、刷新后仍在登录态、缺 CSRF 头的写请求 403、补齐后 201、登出后受保护路由跳登录）、Wiki 历史对比与回滚、陈旧编辑被拒、举报与审核队列、管理端审计日志、附件上传与插入正文、首页聚合、评论分页、全局搜索 |
 | `health.e2e.ts` | HTTP 接口 | 探针经 preview 代理可用 |
 
 - **每次运行前重置数据库**：后端启动命令里先跑 `e2e/support/reset-db.mjs`

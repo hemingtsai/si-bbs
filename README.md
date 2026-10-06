@@ -2,9 +2,12 @@
 
 [![CI](https://github.com/hemingtsai/si-bbs/actions/workflows/ci.yml/badge.svg)](https://github.com/hemingtsai/si-bbs/actions/workflows/ci.yml)
 
-AI 主题社区论坛。Wiki 知识库 + 软件发布及索引（GitHub 项目收录）+ 三板块论坛
-（发帖与回复免审核，支持点赞、精选、板规），三级权限（Admin / Moderator / User），
-软删除 + 回收站，RSS 订阅（`/feed.xml` 及分栏源），单一二进制部署。
+AI 主题社区论坛。Wiki 知识库（版本历史 / 差异对比 / 回滚 / 旧链接重定向）+
+软件发布及索引（GitHub 项目收录）+ 三板块论坛（发帖与回复免审核，支持点赞、精选、
+板规），三级权限（Admin / Moderator / User），软删除 + 回收站，举报与版主处理队列，
+附件上传，FTS5 全文搜索（中文子串可用），RSS 订阅（`/feed.xml` 及分栏源），
+账号自助（改密码 / 改邮箱 / 昵称简介头像 / 找回密码），浏览器会话走 httpOnly cookie
++ CSRF 双保险（API 仍可用 `Authorization: Bearer`），单一二进制部署。
 
 ## 文档
 
@@ -40,8 +43,8 @@ cd frontend && npm install && npm run dev
 ## 测试
 
 ```bash
-cd backend && cargo test          # 138 个后端测试
-cd frontend && npm run test:unit  # 26 个前端单测
+cd backend && cargo test          # 232 个后端测试
+cd frontend && npm run test:unit  # 34 个前端单测
 cd frontend && npm run test:e2e   # Playwright 端到端（需先 test:e2e:install）
 ```
 
