@@ -30,7 +30,7 @@ pub async fn create(
     Path(project_id): Path<i64>,
     Json(input): Json<CommentInput>,
 ) -> Result<(StatusCode, Json<CommentOut>), AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     let content = input.content.trim();
     let len = content.chars().count();
@@ -103,7 +103,7 @@ pub async fn delete(
     headers: HeaderMap,
     Path((project_id, comment_id)): Path<(i64, i64)>,
 ) -> Result<StatusCode, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     let author_id: i64 = sqlx::query_scalar(
         "SELECT user_id FROM comments WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL",

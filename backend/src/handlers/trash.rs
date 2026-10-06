@@ -55,7 +55,7 @@ pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<TrashItem>>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     let (sql, mine): (&str, Option<i64>) = if is_staff(&claims.role) {
         (
@@ -121,7 +121,7 @@ pub async fn restore(
     headers: HeaderMap,
     Path((kind, id)): Path<(String, i64)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     if !KINDS.contains(&kind.as_str()) {
         return Err(AppError::NotFound);
     }

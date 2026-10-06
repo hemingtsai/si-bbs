@@ -19,7 +19,7 @@ pub async fn rate(
     Path(project_id): Path<i64>,
     Json(input): Json<RateInput>,
 ) -> Result<Json<RateAck>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     if !(MIN_SCORE..=MAX_SCORE).contains(&input.score) {
         return Err(AppError::BadRequest(format!(

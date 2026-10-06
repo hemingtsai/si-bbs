@@ -120,7 +120,7 @@ pub async fn create_post(
     headers: HeaderMap,
     Json(input): Json<PostInput>,
 ) -> Result<(StatusCode, Json<ForumPostOut>), AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (board, title, content) = validate_post(&input)?;
 
     let res = sqlx::query(
@@ -151,7 +151,7 @@ pub async fn update_post(
     Path(id): Path<i64>,
     Json(input): Json<PostInput>,
 ) -> Result<Json<ForumPostOut>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (board, title, content) = validate_post(&input)?;
 
     let owner_id: i64 = sqlx::query_scalar(
@@ -185,7 +185,7 @@ pub async fn delete_post(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let owner_id: i64 = sqlx::query_scalar(
         "SELECT author_id FROM forum_posts WHERE id = ?1 AND deleted_at IS NULL",
     )
@@ -279,7 +279,7 @@ pub async fn create_comment(
     Path(id): Path<i64>,
     Json(input): Json<CommentInput>,
 ) -> Result<(StatusCode, Json<ForumComment>), AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let content = input.content.trim();
     if content.is_empty() {
         return Err(AppError::BadRequest("content is required".into()));
@@ -320,7 +320,7 @@ pub async fn delete_comment(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let row: Option<(i64, i64)> = sqlx::query_as(
         "SELECT author_id, post_id FROM forum_comments WHERE id = ?1 AND deleted_at IS NULL",
     )
@@ -362,7 +362,7 @@ async fn toggle_like(
     kind: &str,
     id: i64,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (table, id_col) = match kind {
         "post" => ("forum_posts", "id"),
         "comment" => ("forum_comments", "id"),

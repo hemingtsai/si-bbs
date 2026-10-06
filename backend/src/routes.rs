@@ -94,7 +94,9 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/admin/stats", get(admin::stats))
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
-        .layer(axum::middleware::from_fn(crate::middleware::security::security_headers));
+        .layer(axum::middleware::from_fn(
+            crate::middleware::security::security_headers,
+        ));
 
     // Serve the built SPA when a static directory is available. Unknown paths
     // fall back to index.html so client-side routes survive a refresh.

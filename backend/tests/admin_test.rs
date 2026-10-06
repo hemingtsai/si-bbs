@@ -535,3 +535,76 @@ async fn login_response_exposes_user_id() {
     let id = user_id_of(&server, "alice").await;
     assert!(id > 0);
 }
+
+#[tokio::test]
+async fn banned_user_loses_all_write_access_immediately() {
+    let (server, pool) = admin_server().await;
+    let admin = admin_token(&server).await;
+    register(&server, "bob").await;
+    let bob_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'bob'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let bob = common::login(&server, "bob").await;
+
+    // Confirm the token works before the ban.
+    server
+        .get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .await
+        .assert_status_ok();
+
+    server
+        .patch(&format!("/api/admin/users/{bob_id}/ban"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "banned": true }))
+        .await
+        .assert_status_ok();
+
+    // Every write endpoint must refuse immediately, not at token expiry.
+    server
+        .post("/api/forum/posts")
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .json(&serde_json::json!({ "board": "models", "title": "t", "content": "c" }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+    server
+        .post("/api/wiki")
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .json(&serde_json::json!({ "title": "t", "category": "c", "content": "x" }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+    server
+        .post("/api/projects")
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .json(&serde_json::json!({ "github_url": "https://github.com/a/b", "category": "x" }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn demoted_moderator_cannot_delete_others_post_with_old_token() {
+    let (server, pool) = admin_server().await;
+    let admin = admin_token(&server).await;
+    register(&server, "bob").await;
+    let mod_token = register_login_as_role(&server, &pool, "mod1", "moderator").await;
+
+    // mod1's token shows moderator role. Demote them to plain user.
+    let mod_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'mod1'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    server
+        .patch(&format!("/api/admin/users/{mod_id}/role"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "role": "user" }))
+        .await
+        .assert_status_ok();
+
+    server
+        .patch("/api/forum/posts/999/featured")
+        .add_header("Authorization", format!("Bearer {mod_token}"))
+        .json(&serde_json::json!({ "featured": true }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+}

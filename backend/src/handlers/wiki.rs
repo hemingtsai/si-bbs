@@ -151,7 +151,7 @@ pub async fn detail(
     };
 
     if page.status != WikiStatus::Published.as_str() {
-        let claims = require_auth(&state.cfg, &headers).ok();
+        let claims = require_auth(&state, &headers).await.ok();
         let allowed = claims
             .as_ref()
             .is_some_and(|c| c.sub == page.author_id || is_staff(&c.role));
@@ -169,7 +169,7 @@ pub async fn mine(
     headers: HeaderMap,
     Query(q): Query<WikiListQuery>,
 ) -> Result<Json<Page<WikiPageOut>>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let per_page = q.per_page.unwrap_or(20).clamp(1, 100);
     let page = q.page.unwrap_or(1).max(1);
 
@@ -213,7 +213,7 @@ pub async fn create(
     headers: HeaderMap,
     Json(input): Json<WikiInput>,
 ) -> Result<(StatusCode, Json<WikiPageOut>), AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (title, category, content, status) = validate(&input)?;
 
     let slug = unique_slug(&state, &slugify(&title)).await;
@@ -243,7 +243,7 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(input): Json<WikiInput>,
 ) -> Result<Json<WikiPageOut>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (title, category, content, status) = validate(&input)?;
 
     let existing = fetch_page(&state, id).await?;
@@ -273,7 +273,7 @@ pub async fn delete(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let existing = fetch_page(&state, id).await?;
     if existing.author_id != claims.sub && !is_staff(&claims.role) {
         return Err(AppError::Forbidden);

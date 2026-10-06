@@ -62,7 +62,7 @@ pub async fn submit(
     headers: HeaderMap,
     Json(input): Json<SubmitInput>,
 ) -> Result<(StatusCode, Json<ProjectOut>), AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     let repo_ref = github::parse_repo_url(&input.github_url)?;
     let category = input.category.trim();
@@ -174,7 +174,7 @@ pub async fn detail(
     Path(id): Path<i64>,
 ) -> Result<Json<ProjectOut>, AppError> {
     let mut project = fetch_project(&state, id).await?;
-    let viewer = require_auth(&state.cfg, &headers).ok();
+    let viewer = require_auth(&state, &headers).await.ok();
 
     let is_owner = viewer
         .as_ref()
@@ -201,7 +201,7 @@ pub async fn mine(
     headers: HeaderMap,
     Query(q): Query<MineQuery>,
 ) -> Result<Json<Page<ProjectOut>>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let (page, per_page) = paging(q.page, q.per_page);
 
     let total: i64 = sqlx::query_scalar(
@@ -317,7 +317,7 @@ pub async fn delete(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
     let project = fetch_project(&state, id).await?;
 
     let staff =

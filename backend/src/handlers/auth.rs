@@ -124,7 +124,7 @@ pub async fn me(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
+    let claims = require_auth(&state, &headers).await?;
 
     // Read the current row: a token minted before a role change or ban must not
     // report stale privileges.

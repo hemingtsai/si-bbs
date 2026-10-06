@@ -5,43 +5,43 @@ use crate::models::user::Role;
 use crate::routes::AppState;
 use crate::services::auth;
 
-/// Extract and verify the `Authorization: Bearer <access>` header.
+/// Extract and verify the `Authorization: Bearer <access>` header, then verify
+/// against the **database** that the account still exists and is not banned,
+/// and return the claims with the *current* role instead of the token's role.
 ///
-/// This is stateless: it trusts the signed claims and performs no database
-/// access. Use [`require_role`] when the answer depends on the caller's current
-/// privileges.
-pub fn require_auth(
-    cfg: &crate::config::Config,
-    headers: &HeaderMap,
-) -> Result<auth::Claims, AppError> {
+/// This makes a ban or a role change effective immediately on every endpoint,
+/// including the ones that only require a valid token. The cost is one indexed
+/// lookup per request, which is negligible on SQLite.
+pub async fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<auth::Claims, AppError> {
     let raw = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .ok_or(AppError::Unauthorized)?;
     let token = raw.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
-    auth::verify(cfg, token, "access").map_err(|_| AppError::Unauthorized)
+    let mut claims =
+        auth::verify(&state.cfg, token, "access").map_err(|_| AppError::Unauthorized)?;
+
+    let privs = crate::models::user::current_privileges(&state.pool, claims.sub)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    if privs.banned {
+        return Err(AppError::Forbidden);
+    }
+    claims.role = privs.role.as_str().to_string();
+    Ok(claims)
 }
 
 /// Require the caller to hold one of `allowed` roles **according to the
-/// database**, not according to the token.
-///
-/// A role change or a ban therefore takes effect on the very next request
-/// instead of waiting for the access token to expire. This costs one indexed
-/// lookup, which is why it is only done for role-guarded endpoints.
+/// database**. This is now a thin wrapper around [`require_auth`], which
+/// already rejects banned and deleted accounts and refreshes the role.
 pub async fn require_role(
     state: &AppState,
     headers: &HeaderMap,
     allowed: &[Role],
 ) -> Result<auth::Claims, AppError> {
-    let claims = require_auth(&state.cfg, headers)?;
-    let current = crate::models::user::current_privileges(&state.pool, claims.sub)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-
-    if current.banned {
-        return Err(AppError::Forbidden);
-    }
-    if !allowed.contains(&current.role) {
+    let claims = require_auth(state, headers).await?;
+    let current_role = Role::parse(&claims.role).ok_or(AppError::Forbidden)?;
+    if !allowed.contains(&current_role) {
         return Err(AppError::Forbidden);
     }
     Ok(claims)

@@ -12,12 +12,12 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
     let h = res.headers_mut();
 
-    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
-    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
     h.insert(
-        "referrer-policy",
-        HeaderValue::from_static("no-referrer"),
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
     );
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     h.insert(
         "content-security-policy",
         HeaderValue::from_static(
