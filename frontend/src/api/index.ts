@@ -8,6 +8,7 @@ import type {
   Me,
   MyReport,
   ProfileInput,
+  SearchHit,
   ProjectSummary,
   WikiDiff,
   WikiPageSummary,
@@ -182,6 +183,13 @@ export const attachmentApi = {
     form.append('file', file)
     return api.post<Attachment>('/attachments', form)
   },
+}
+
+export const searchApi = {
+  /// Global search. An empty `q` is an empty page, so a search box can call this on
+  /// every keystroke.
+  query: (params: { q: string; kind?: 'all' | 'wiki' | 'forum' | 'project'; page?: number }) =>
+    api.get<Page<SearchHit>>('/search', { params }),
 }
 
 export const reportApi = {

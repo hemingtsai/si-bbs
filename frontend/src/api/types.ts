@@ -60,6 +60,16 @@ export interface AdminReport {
   created_at: string
 }
 
+export interface SearchHit {
+  kind: 'wiki' | 'forum' | 'project'
+  id: number
+  title: string
+  /// Only wiki results have one; the others are addressed by id.
+  slug: string | null
+  excerpt: string
+  updated_at: string
+}
+
 export interface AuditEntry {
   id: number
   actor_id: number

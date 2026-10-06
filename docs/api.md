@@ -186,7 +186,7 @@ SMTP 配置、也没有引入邮件依赖）。因此当前行为是：把形如
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/search?q=&kind=&page=&per_page=` | 公开 | 跨 Wiki、论坛、项目搜索。`kind` ∈ `all`(默认)/`wiki`/`forum`/`project`，非法值 400。返回统一形状 `{kind, id, title, excerpt, updated_at}`，按相关度（FTS5 `bm25`）排序。`q` 为空返回空页而不是报错，搜索框可以每敲一个字就调 |
+| GET | `/api/search?q=&kind=&page=&per_page=` | 公开 | 跨 Wiki、论坛、项目搜索。`kind` ∈ `all`(默认)/`wiki`/`forum`/`project`，非法值 400。返回统一形状 `{kind, id, title, slug, excerpt, updated_at}`（`slug` 仅 wiki 结果有值，其余为 `null`，因为只有 wiki 用 slug 寻址），按相关度（FTS5 `bm25`）排序。`q` 为空返回空页而不是报错，搜索框可以每敲一个字就调 |
 
 实现要点：
 

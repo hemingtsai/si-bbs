@@ -39,6 +39,15 @@ function logout(): void {
   router.push({ name: 'home' })
 }
 
+const searchTerm = ref('')
+
+/// Search is a page, not a dropdown: results are linkable and reloadable.
+function goSearch(): void {
+  const q = searchTerm.value.trim()
+  if (!q) return
+  router.push({ name: 'search', query: { q } })
+}
+
 const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themePref.value === 'light' ? '浅色' : '深色')
 </script>
 
@@ -55,6 +64,9 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
       <RouterLink v-if="auth.isAuthenticated" to="/settings" class="nav-item">设置</RouterLink>
       <RouterLink v-if="auth.isAuthenticated" to="/trash" class="nav-item">回收站</RouterLink>
       <RouterLink v-if="!auth.isAuthenticated" to="/login" class="nav-item">登录</RouterLink>
+      <form class="sidebar-search" @submit.prevent="goSearch">
+        <input v-model="searchTerm" type="search" placeholder="搜索…" aria-label="搜索" />
+      </form>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">
         <RouterLink v-if="auth.isAuthenticated" to="/settings" class="user user-link">
@@ -71,6 +83,9 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
       <div class="mainbar">
         <span class="page-title">{{ String(route.name ?? '') }}</span>
         <div class="mainbar-right">
+          <form class="mainbar-search" @submit.prevent="goSearch">
+            <input v-model="searchTerm" type="search" placeholder="搜索…" aria-label="搜索站点" />
+          </form>
           <!-- Only visible on <= 768px via .mobile-nav-only -->
           <div class="mobile-nav-only">
             <RouterLink v-if="auth.isAuthenticated" to="/settings" class="user user-link">

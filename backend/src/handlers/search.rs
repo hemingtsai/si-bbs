@@ -25,6 +25,9 @@ pub struct Hit {
     pub kind: String,
     pub id: i64,
     pub title: String,
+    /// Wiki pages are addressed by slug, so a result can link straight to one.
+    /// `NULL` for the other kinds, which are addressed by id.
+    pub slug: Option<String>,
     /// Excerpt around the match, produced by FTS5 itself (or the opening of the body
     /// for the short-query fallback).
     pub excerpt: String,
@@ -133,21 +136,21 @@ fn union_sql(branches: &[&str], tail: &str, fts: bool) -> String {
         let part = if fts {
             match *branch {
                 "wiki" => {
-                    "SELECT 'wiki' AS kind, w.id AS id, w.title AS title, \
+                    "SELECT 'wiki' AS kind, w.id AS id, w.title AS title, w.slug AS slug, \
                      snippet(wiki_fts, 1, '', '', '…', 16) AS excerpt, w.updated_at AS updated_at, \
                      bm25(wiki_fts) AS score \
                      FROM wiki_fts JOIN wiki_pages w ON w.id = wiki_fts.rowid \
                      WHERE wiki_fts MATCH ?1 AND w.deleted_at IS NULL AND w.status = 'published'"
                 }
                 "forum" => {
-                    "SELECT 'forum' AS kind, p.id AS id, p.title AS title, \
+                    "SELECT 'forum' AS kind, p.id AS id, p.title AS title, NULL AS slug, \
                      snippet(forum_fts, 1, '', '', '…', 16) AS excerpt, p.created_at AS updated_at, \
                      bm25(forum_fts) AS score \
                      FROM forum_fts JOIN forum_posts p ON p.id = forum_fts.rowid \
                      WHERE forum_fts MATCH ?1 AND p.deleted_at IS NULL"
                 }
                 _ => {
-                    "SELECT 'project' AS kind, pr.id AS id, pr.name AS title, \
+                    "SELECT 'project' AS kind, pr.id AS id, pr.name AS title, NULL AS slug, \
                      snippet(projects_fts, 1, '', '', '…', 16) AS excerpt, pr.updated_at AS updated_at, \
                      bm25(projects_fts) AS score \
                      FROM projects_fts JOIN projects pr ON pr.id = projects_fts.rowid \
@@ -157,21 +160,21 @@ fn union_sql(branches: &[&str], tail: &str, fts: bool) -> String {
         } else {
             match *branch {
                 "wiki" => {
-                    "SELECT 'wiki' AS kind, w.id AS id, w.title AS title, \
+                    "SELECT 'wiki' AS kind, w.id AS id, w.title AS title, w.slug AS slug, \
                      substr(w.content, 1, 160) AS excerpt, w.updated_at AS updated_at, 0 AS score \
                      FROM wiki_pages w \
                      WHERE w.deleted_at IS NULL AND w.status = 'published' \
                      AND (w.title LIKE ?1 ESCAPE '\\' OR w.content LIKE ?1 ESCAPE '\\')"
                 }
                 "forum" => {
-                    "SELECT 'forum' AS kind, p.id AS id, p.title AS title, \
+                    "SELECT 'forum' AS kind, p.id AS id, p.title AS title, NULL AS slug, \
                      substr(p.content, 1, 160) AS excerpt, p.created_at AS updated_at, 0 AS score \
                      FROM forum_posts p \
                      WHERE p.deleted_at IS NULL \
                      AND (p.title LIKE ?1 ESCAPE '\\' OR p.content LIKE ?1 ESCAPE '\\')"
                 }
                 _ => {
-                    "SELECT 'project' AS kind, pr.id AS id, pr.name AS title, \
+                    "SELECT 'project' AS kind, pr.id AS id, pr.name AS title, NULL AS slug, \
                      substr(IFNULL(pr.description, ''), 1, 160) AS excerpt, \
                      pr.updated_at AS updated_at, 0 AS score \
                      FROM projects pr \

@@ -4,6 +4,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: () => import('../views/Home.vue') },
+    { path: '/search', name: 'search', component: () => import('../views/Search.vue') },
     { path: '/wiki', name: 'wiki-list', component: () => import('../views/wiki/WikiList.vue') },
     {
       path: '/wiki/:slug',

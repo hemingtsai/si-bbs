@@ -415,3 +415,31 @@ test('长回复串分页加载，而不是永远只显示第一页', async ({ pa
   // The button disappears once everything is loaded — no dead control left behind.
   await expect(page.getByRole('button', { name: /加载更多回复/ })).toHaveCount(0)
 })
+
+test('搜索页能从侧栏进入，中文子串能搜到并直接跳转', async ({ page }) => {
+  const author = `us2_${RUN}`
+  await registerAndLogin(page, author)
+
+  const marker = `量化${RUN}`
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`关于${marker}的讨论`)
+  await page.getByLabel('正文').fill('正文里也提到它')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+
+  // Sidebar search box → search page, URL carries the query so it is shareable.
+  await page.locator('.sidebar-search input').fill(marker)
+  await page.locator('.sidebar-search input').press('Enter')
+  await expect(page).toHaveURL(new RegExp(`/search\\?q=`))
+  await expect(page.getByText('找到 1 条')).toBeVisible()
+  await expect(page.getByRole('link', { name: new RegExp(marker) })).toBeVisible()
+
+  // The result links straight to the content.
+  await page.getByRole('link', { name: new RegExp(marker) }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+  await expect(page.getByText('正文里也提到它')).toBeVisible()
+
+  // A wildcard is literal, not "match everything" — the bug this replaced.
+  await page.goto('/search?q=%25')
+  await expect(page.getByText('没有匹配的结果。')).toBeVisible()
+})

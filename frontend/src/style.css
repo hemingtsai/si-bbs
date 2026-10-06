@@ -229,6 +229,40 @@ code {
   white-space: nowrap;
 }
 
+/* Search boxes: one in the sidebar, one in the top bar for narrow screens. */
+.sidebar-search {
+  margin-top: 8px;
+  padding: 0 2px;
+}
+
+.sidebar-search input,
+.mainbar-search input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.mainbar-search {
+  width: 200px;
+}
+
+@media (max-width: 768px) {
+  .sidebar-search {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) {
+  .mainbar-search {
+    display: none;
+  }
+}
+
 /* The name doubles as the way into the settings page. */
 .sidebar-foot .user-link {
   text-decoration: none;

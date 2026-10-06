@@ -86,6 +86,8 @@ async fn search_finds_content_across_all_three_sources() {
         .find(|hit| hit["kind"] == "wiki")
         .unwrap();
     assert!(wiki_hit["excerpt"].as_str().unwrap().contains("rust"));
+    // A wiki hit carries its slug so the UI can link to it; the others are by id.
+    assert!(wiki_hit["slug"].as_str().is_some_and(|s| !s.is_empty()));
     assert!(wiki_hit["title"].as_str().unwrap().contains("Rust"));
 }
 
