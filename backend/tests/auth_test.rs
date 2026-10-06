@@ -330,3 +330,49 @@ async fn password_change_validates_input_and_the_current_password() {
         .await
         .assert_status_unauthorized();
 }
+
+#[tokio::test]
+async fn changing_the_email_requires_the_password_and_keeps_uniqueness() {
+    let app = common::test_server().await;
+    common::register(&app, "judy").await;
+    common::register(&app, "karl").await;
+    let token = common::login(&app, "judy").await;
+    let auth = format!("Bearer {token}");
+
+    // Wrong password.
+    app.post("/api/auth/email")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"password": "not-it", "new_email": "judy@new.test"}))
+        .await
+        .assert_status_unauthorized();
+    // Malformed address.
+    app.post("/api/auth/email")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"password": "password123", "new_email": "nope"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    // Somebody else's address, differing only by case.
+    app.post("/api/auth/email")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"password": "password123", "new_email": "KARL@example.com"}))
+        .await
+        .assert_status_conflict();
+
+    // A free address is accepted and visible on /me.
+    app.post("/api/auth/email")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"password": "password123", "new_email": "judy@new.test"}))
+        .await
+        .assert_status_ok();
+    let me = app
+        .get("/api/auth/me")
+        .add_header("Authorization", auth.clone())
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(me["email"], "judy@new.test");
+    // The old address is now free for someone else.
+    app.post("/api/auth/register")
+        .json(&json!({"username": "lena", "email": "judy@example.com", "password": "secret123"}))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+}

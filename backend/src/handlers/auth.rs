@@ -175,12 +175,12 @@ pub async fn me(
 
     // Read the current row: a token minted before a role change or ban must not
     // report stale privileges.
-    let row: Option<(String, String, i64)> =
-        sqlx::query_as("SELECT username, role, banned FROM users WHERE id = ?1")
+    let row: Option<(String, String, i64, String)> =
+        sqlx::query_as("SELECT username, role, banned, email FROM users WHERE id = ?1")
             .bind(claims.sub)
             .fetch_optional(&state.pool)
             .await?;
-    let (username, role, banned) = row.ok_or(AppError::Unauthorized)?;
+    let (username, role, banned, email) = row.ok_or(AppError::Unauthorized)?;
     if banned != 0 {
         return Err(AppError::Forbidden);
     }
@@ -188,6 +188,7 @@ pub async fn me(
     Ok(Json(serde_json::json!({
         "id": claims.sub,
         "username": username,
+        "email": email,
         "role": Role::parse(&role).unwrap_or(Role::User).as_str(),
         "banned": banned != 0,
     })))
@@ -271,4 +272,58 @@ pub async fn change_password(
         "user_id": claims.sub,
         "username": username,
     })))
+}
+
+#[derive(Deserialize)]
+pub struct EmailChangeReq {
+    pub password: String,
+    pub new_email: String,
+}
+
+/// Change the caller's own email address. Password confirmation is required: an
+/// unattended session must not be able to move the account's contact address.
+pub async fn change_email(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<EmailChangeReq>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state, &headers).await?;
+    let email = validate::email(&body.new_email).map_err(AppError::BadRequest)?;
+
+    let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    if !auth::verify_password(&body.password, &hash) {
+        let key = format!("emailchange:{}", claims.sub);
+        if let Some(retry_after_secs) = state.login_limiter.retry_after(&key) {
+            return Err(AppError::TooManyRequests { retry_after_secs });
+        }
+        state.login_limiter.record(&key);
+        return Err(AppError::Unauthorized);
+    }
+    state
+        .login_limiter
+        .clear(&format!("emailchange:{}", claims.sub));
+
+    // Same case-insensitive uniqueness rule as registration, enforced in one
+    // statement so two accounts cannot race into the same address.
+    let res = sqlx::query(
+        "UPDATE users SET email = ?2, updated_at = CURRENT_TIMESTAMP \
+         WHERE id = ?1 \
+           AND NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower(?2) AND id != ?1)",
+    )
+    .bind(claims.sub)
+    .bind(&email)
+    .execute(&state.pool)
+    .await?;
+
+    if res.rows_affected() == 0 {
+        // Either the address is taken, or the row vanished; both are conflicts the
+        // caller can act on.
+        return Err(AppError::Conflict("email is already in use".into()));
+    }
+
+    Ok(Json(serde_json::json!({ "email": email })))
 }

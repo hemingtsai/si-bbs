@@ -37,7 +37,8 @@
 | POST | `/api/auth/register` | `{username, email, password}` | 201 `{role}` | 用户名 3–32 字符且只允许字母/数字/`_`/`-`；邮箱需含单个 `@` 与带点域名且 ≤254 字符；密码 6–128 **字符**。用户名或邮箱重复（**忽略大小写**）返回 409；超限返回 400；注册接口有进程级配额，超限 429 |
 | POST | `/api/auth/login` | `{username, password}` | 200 `{access_token, refresh_token, role, user_id, username}` | 封禁账号返回 403；同一账号（忽略大小写）在 5 分钟内失败 8 次后返回 429 并带 `Retry-After`，登录成功即清零 |
 | POST | `/api/auth/refresh` | `{refresh_token}` | 200 `{access_token, refresh_token}` | 会重新读取数据库角色；被封禁或被删返回 403/401 |
-| GET | `/api/auth/me` | — | 200 `{id, username, role, banned}` | 角色以数据库为准 |
+| GET | `/api/auth/me` | — | 200 `{id, username, email, role, banned}` | 角色以数据库为准 |
+| POST | `/api/auth/email` | 登录 | `{password, new_email}` | 改自己的邮箱；需当前密码，格式校验同注册，**忽略大小写唯一**（冲突 409）；密码错误 401 并计入失败配额 |
 | POST | `/api/auth/password` | 登录 | `{current_password, new_password}` | 改自己的密码。新密码 6–128 字符且必须与旧密码不同；**成功后 `users.token_version` 自增，此前签发的所有 access/refresh token 立即失效**（含被改密码者自己的），因此响应会返回一对新 token 供当前会话继续使用。当前密码错误返回 401，并计入与登录相同的失败配额（5 分钟 8 次后 429） |
 
 ## 项目
