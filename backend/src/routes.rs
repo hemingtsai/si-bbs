@@ -38,7 +38,17 @@ impl AppState {
     }
 }
 
+/// Router built from the `STATIC_DIR` environment variable.
 pub fn create_router(state: AppState) -> Router {
+    create_router_with_static(state, std::env::var("STATIC_DIR").ok())
+}
+
+/// Router with an explicit static directory.
+///
+/// `dir` is a parameter rather than an environment lookup so the static-file
+/// behaviour (SPA fallback, cache headers) can be tested without mutating the
+/// process environment, which is unsafe and racy across parallel tests.
+pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router {
     let mut router = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/auth/register", post(auth::register))
@@ -117,15 +127,11 @@ pub fn create_router(state: AppState) -> Router {
             "/api/admin/users/{id}/ban",
             axum::routing::patch(admin::set_ban),
         )
-        .route("/api/admin/stats", get(admin::stats))
-        .layer(tower::limit::ConcurrencyLimitLayer::new(64))
-        .layer(axum::middleware::from_fn(
-            crate::middleware::security::security_headers,
-        ));
+        .route("/api/admin/stats", get(admin::stats));
 
     // Serve the built SPA when a static directory is available. Unknown paths
     // fall back to index.html so client-side routes survive a refresh.
-    if let Ok(dir) = std::env::var("STATIC_DIR") {
+    if let Some(dir) = dir {
         let index = std::path::Path::new(&dir).join("index.html");
         if index.exists() {
             let static_files = ServeDir::new(&dir).fallback(ServeFile::new(&index));
@@ -148,5 +154,14 @@ pub fn create_router(state: AppState) -> Router {
         }
     }
 
-    router.with_state(state)
+    // Layers are applied *after* the fallback is registered on purpose:
+    // `Router::layer` only wraps what already exists, so applying them earlier
+    // left every static response without security headers, without the
+    // `/assets/*` cache header and outside the concurrency limit.
+    router
+        .layer(tower::limit::ConcurrencyLimitLayer::new(64))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::security::security_headers,
+        ))
+        .with_state(state)
 }

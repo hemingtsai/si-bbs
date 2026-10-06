@@ -3,7 +3,7 @@
 use axum_test::TestServer;
 use si_bbs_backend::config::Config;
 use si_bbs_backend::create_router;
-use si_bbs_backend::routes::AppState;
+use si_bbs_backend::routes::{AppState, create_router_with_static};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 
@@ -35,15 +35,26 @@ pub async fn test_ctx_with_github(github_api_base: &str) -> (TestServer, SqliteP
 /// (wiremock keeps the first mounted mock, so a second mock server is the way
 /// to change GitHub's answer mid-test).
 pub fn server_with(pool: SqlitePool, github_api_base: &str) -> TestServer {
-    let cfg = Config {
+    TestServer::new(create_router(AppState::new(pool, test_config(github_api_base))))
+}
+
+/// Router that serves a static directory as well as the API, so the SPA
+/// fallback and its response headers can be exercised without touching the
+/// process environment.
+pub fn server_with_static(pool: SqlitePool, static_dir: Option<String>) -> TestServer {
+    let state = AppState::new(pool, test_config("https://api.github.com"));
+    TestServer::new(create_router_with_static(state, static_dir))
+}
+
+fn test_config(github_api_base: &str) -> Config {
+    Config {
         database_url: "sqlite::memory:".into(),
         jwt_secret: "test-secret".into(),
         access_ttl_secs: 900,
         refresh_ttl_secs: 7 * 24 * 3600,
         github_token: String::new(),
         github_api_base: github_api_base.to_string(),
-    };
-    TestServer::new(create_router(AppState::new(pool, cfg)))
+    }
 }
 
 pub async fn test_server() -> TestServer {
