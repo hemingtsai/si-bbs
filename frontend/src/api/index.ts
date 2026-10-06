@@ -65,7 +65,7 @@ export const commentsApi = {
 }
 
 export const wikiApi = {
-  list: (params?: { category?: string; q?: string; page?: number }) =>
+  list: (params?: { category?: string; q?: string; page?: number; per_page?: number }) =>
     api.get<Page<WikiPageSummary>>('/wiki', { params }),
   detail: (slug: string) => api.get<WikiPage>(`/wiki/${slug}`),
   categories: () => api.get<WikiCategory[]>('/wiki/categories'),

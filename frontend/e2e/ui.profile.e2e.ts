@@ -340,3 +340,39 @@ test('版主能在页面上处理举报，管理员能在页面上看到审计�
   await expect(page.getByText('report.resolve')).toBeVisible()
   await expect(page.getByText('已确认是广告')).toBeVisible()
 })
+
+test('首页汇总最新帖子、新收录项目与最近 Wiki 变更', async ({ page }) => {
+  const author = `uh_${RUN}`
+  await registerAndLogin(page, author)
+
+  // One of each, so all three sections have something to show.
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`首页帖子_${RUN}`)
+  await page.getByLabel('正文').fill('正文')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+
+  await page.goto('/wiki/new')
+  await page.getByLabel('标题').fill(`首页页面_${RUN}`)
+  await page.getByLabel('分类').fill('测试')
+  await page.getByLabel('正文（Markdown）').fill('内容')
+  await page.getByLabel('状态').selectOption('published')
+  await page.getByRole('button', { name: '保存' }).click()
+  // The slug is generated from the (Chinese) title, so assert on the rendered page
+  // rather than guessing the URL.
+  await expect(page.getByRole('heading', { name: `首页页面_${RUN}` })).toBeVisible()
+
+  // A project has to be approved by a moderator before it appears; the seeded DB
+  // already holds approved projects, so the section just has to render one.
+  await page.goto('/')
+  await expect(page.getByText('最新帖子')).toBeVisible()
+  await expect(page.getByRole('link', { name: new RegExp(`首页帖子_${RUN}`) })).toBeVisible()
+  await expect(page.getByText('新收录项目')).toBeVisible()
+  await expect(page.getByText('最近 Wiki 变更')).toBeVisible()
+  await expect(page.getByRole('link', { name: new RegExp(`首页页面_${RUN}`) })).toBeVisible()
+
+  // The aggregation links straight into the content.
+  await page.getByRole('link', { name: new RegExp(`首页帖子_${RUN}`) }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+  await expect(page.getByText('正文')).toBeVisible()
+})
