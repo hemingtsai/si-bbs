@@ -1,94 +1,155 @@
-import { expect, test, request } from '@playwright/test'
+import { type APIRequestContext, expect, request, test } from '@playwright/test'
 
+import { promoteUser } from './support/db'
+
+/**
+ * End-to-end coverage of the forum API through real HTTP.
+ *
+ * The database is wiped by `playwright.config.ts` before the backend starts, and
+ * every account name carries a per-run suffix, so the suite is repeatable: an
+ * earlier version asserted absolute totals against a database that survived
+ * between runs and therefore failed the second time it was executed.
+ *
+ * These cases drive the HTTP surface only. Browser-level flows are not covered
+ * yet — see `docs/testing.md`.
+ */
 const API = 'http://127.0.0.1:3000'
+const RUN = Date.now().toString(36)
+const PASSWORD = 'password123'
 
-async function api() {
-  return await request.newContext({ baseURL: API })
+// Distinct account per case: registration is case-insensitively unique, so tests
+// must not share a name.
+const A1 = `a1_${RUN}`
+const A2 = `a2_${RUN}`
+const B1 = `b1_${RUN}`
+const M1 = `m1_${RUN}`
+const A3 = `a3_${RUN}`
+const M2 = `m2_${RUN}`
+
+async function api(): Promise<APIRequestContext> {
+  return request.newContext({ baseURL: API })
 }
 
-async function register(name: string) {
-  const ctx = await api()
-  await ctx.post('/api/auth/register', { data: { username: name, email: `${name}@e2e.com`, password: 'password123' } })
-  return ctx
+async function register(ctx: APIRequestContext, username: string): Promise<void> {
+  const res = await ctx.post('/api/auth/register', {
+    data: { username, email: `${username}@e2e.test`, password: PASSWORD },
+  })
+  expect(res.status(), `register ${username}`).toBe(201)
 }
 
-async function login(name: string) {
-  const ctx = await api()
-  const login = await ctx.post('/api/auth/login', { data: { username: name, password: 'password123' } })
-  const body = await login.json()
-  return { ctx, token: body.access_token, role: body.role }
+async function login(ctx: APIRequestContext, username: string): Promise<string> {
+  const res = await ctx.post('/api/auth/login', {
+    data: { username, password: PASSWORD },
+  })
+  expect(res.status(), `login ${username}`).toBe(200)
+  return (await res.json()).access_token
 }
 
-test('发帖免审核，点赞幂等，回帖无需审核', async () => {
-  const alice = await register('alice')
-  const { token } = await login('alice')
+async function postCount(ctx: APIRequestContext, board: string): Promise<number> {
+  const res = await ctx.get(`/api/forum/posts?board=${board}&per_page=1`)
+  expect(res.status()).toBe(200)
+  return (await res.json()).total
+}
 
-  const post = await alice.post('/api/forum/posts', {
-    data: { board: 'models', title: 'E2E 帖子', content: '内容' },
-    headers: { Authorization: `Bearer ${token}` },
+async function createPost(
+  ctx: APIRequestContext,
+  auth: Record<string, string>,
+  board: string,
+  title: string,
+): Promise<number> {
+  const res = await ctx.post('/api/forum/posts', {
+    data: { board, title, content: '内容' },
+    headers: auth,
   })
-  expect(post.status()).toBe(201)
-  const postBody = await post.json()
+  expect(res.status()).toBe(201)
+  return (await res.json()).id
+}
 
-  // 列表里立刻能看到
-  const list = await alice.get('/api/forum/posts?board=models')
-  expect((await list.json()).total).toBe(1)
+test('发帖与回帖不经审核即公开，点赞可切换', async () => {
+  const alice = await api()
+  await register(alice, A1)
+  const auth = { Authorization: `Bearer ${await login(alice, A1)}` }
 
-  // 点赞切换
-  const like1 = await alice.post(`/api/forum/posts/${postBody.id}/like`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  expect((await like1.json()).likes_count).toBe(1)
-  const like2 = await alice.post(`/api/forum/posts/${postBody.id}/like`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  expect((await like2.json()).likes_count).toBe(0)
+  const before = await postCount(alice, 'models')
+  const postId = await createPost(alice, auth, 'models', `E2E 帖子 ${RUN}`)
 
-  // 回帖免审核
-  const comment = await alice.post(`/api/forum/posts/${postBody.id}/comments`, {
+  // Visible immediately: there is no pending state at all.
+  expect(await postCount(alice, 'models')).toBe(before + 1)
+
+  // Toggle: like -> unlike -> like.
+  for (const expected of [1, 0, 1]) {
+    const res = await alice.post(`/api/forum/posts/${postId}/like`, { headers: auth })
+    expect(res.status()).toBe(200)
+    expect((await res.json()).likes_count).toBe(expected)
+  }
+
+  const reply = await alice.post(`/api/forum/posts/${postId}/comments`, {
     data: { content: '沙发' },
-    headers: { Authorization: `Bearer ${token}` },
+    headers: auth,
   })
-  expect(comment.status()).toBe(201)
+  expect(reply.status()).toBe(201)
+
+  const detail = await (await alice.get(`/api/forum/posts/${postId}`)).json()
+  expect(detail.comments_count).toBe(1)
+  expect(detail.likes_count).toBe(1)
 })
 
-test('作者删帖、他人越权删帖被拒、mod 可删', async () => {
-  const alice = await register('alice2')
-  const bob = await register('bob2')
-  const { token: aToken } = await login('alice2')
-  const { token: bToken } = await login('bob2')
+test('作者可删自己的帖子，他人越权被拒，版主可删任何帖子', async () => {
+  const alice = await api()
+  const bob = await api()
+  const mod = await api()
+  await register(alice, A2)
+  await register(bob, B1)
+  await register(mod, M1)
+  const aliceAuth = { Authorization: `Bearer ${await login(alice, A2)}` }
+  const bobAuth = { Authorization: `Bearer ${await login(bob, B1)}` }
+  // Logged in *before* being promoted: the permission must come from the
+  // database on every request, not from what the token says.
+  const modAuth = { Authorization: `Bearer ${await login(mod, M1)}` }
+  promoteUser(M1, 'moderator')
 
-  const post = await alice.post('/api/forum/posts', {
-    data: { board: 'life', title: '要删除', content: 'x' },
-    headers: { Authorization: `Bearer ${aToken}` },
-  })
-  const id = (await post.json()).id
+  const forMod = await createPost(alice, aliceAuth, 'life', `版主可删 ${RUN}`)
+  const bobDelete = await bob.delete(`/api/forum/posts/${forMod}`, { headers: bobAuth })
+  expect(bobDelete.status()).toBe(403)
+  const modDelete = await mod.delete(`/api/forum/posts/${forMod}`, { headers: modAuth })
+  expect(modDelete.status()).toBe(204)
 
-  const bobDel = await bob.delete(`/api/forum/posts/${id}`, { headers: { Authorization: `Bearer ${bToken}` } })
-  expect(bobDel.status()).toBe(403)
-
-  const admin = await api()
-  await admin.post('/api/auth/register', { data: { username: 'mod1', email: 'm@e2e.com', password: 'password123' } })
-  // 提升为 moderrator 通过直接改库没有现成 API，所以直接验证作者删除
-  const aliceDel = await alice.delete(`/api/forum/posts/${id}`, { headers: { Authorization: `Bearer ${aToken}` } })
-  expect(aliceDel.status()).toBe(204)
+  const own = await createPost(alice, aliceAuth, 'life', `作者自删 ${RUN}`)
+  const ownDelete = await alice.delete(`/api/forum/posts/${own}`, { headers: aliceAuth })
+  expect(ownDelete.status()).toBe(204)
 })
 
-test('精选帖子排到前面，规则按版块返回', async () => {
-  const alice = await register('alice3')
-  const { token } = await login('alice3')
-  const a = await alice.post('/api/forum/posts', { data: { board: 'tools', title: '普通', content: 'x' }, headers: { Authorization: `Bearer ${token}` } })
-  const b = await alice.post('/api/forum/posts', { data: { board: 'tools', title: '被精选', content: 'x' }, headers: { Authorization: `Bearer ${token}` } })
-  const bId = (await b.json()).id
+test('精选帖排在列表最前，板规按版块返回', async () => {
+  const alice = await api()
+  const mod = await api()
+  await register(alice, A3)
+  await register(mod, M2)
+  const aliceAuth = { Authorization: `Bearer ${await login(alice, A3)}` }
+  const modAuth = { Authorization: `Bearer ${await login(mod, M2)}` }
+  promoteUser(M2, 'moderator')
 
-  // 非 staff 精选被拒（需要后端数据库直接改 role，这里跳过；由集成测试覆盖）
-  // 规则接口返回全局 + 本版两条
-  const rules = await alice.get('/api/forum/rules?board=tools')
-  const rows = await rules.json()
-  expect(rows.length).toBe(2)
-  expect(rows[0].board).toBe('global')
-  expect(rows[1].board).toBe('tools')
+  const before = await postCount(alice, 'tools')
+  // The featured post is created *first*, so it has the smaller id: if the
+  // listing ignored `is_featured` it would sort behind the newer plain post and
+  // this assertion would catch it. (Creating it second would pass even with the
+  // feature removed.)
+  const featuredTitle = `被精选 ${RUN}`
+  const featured = await createPost(alice, aliceAuth, 'tools', featuredTitle)
+  await createPost(alice, aliceAuth, 'tools', `普通 ${RUN}`)
 
-  const list = await alice.get('/api/forum/posts?board=tools')
-  expect((await list.json()).total).toBe(2)
+  const res = await mod.patch(`/api/forum/posts/${featured}/featured`, {
+    data: { featured: true },
+    headers: modAuth,
+  })
+  expect(res.status()).toBe(200)
+
+  const list = await (await alice.get('/api/forum/posts?board=tools&per_page=100')).json()
+  expect(list.total).toBe(before + 2)
+  const ours = list.items
+    .map((p: { title: string }) => p.title)
+    .filter((t: string) => t.endsWith(RUN))
+  expect(ours[0]).toBe(featuredTitle)
+
+  const rules = await (await alice.get('/api/forum/rules?board=tools')).json()
+  expect(rules.map((r: { board: string }) => r.board)).toEqual(['global', 'tools'])
 })

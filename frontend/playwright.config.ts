@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+import { E2E_DB_URL } from './e2e/support/db'
+
 const HOST = '127.0.0.1'
 const PORT = 5173
 const REPO_ROOT = '..'
@@ -7,14 +9,17 @@ const BASE_URL = `http://${HOST}:${PORT}`
 const API_URL = `http://${HOST}:3000`
 const HEALTH_URL = `${API_URL}/api/health`
 
-const BACKEND_CMD = 'cargo run --manifest-path backend/Cargo.toml'
+// The database is wiped by the command that starts the backend (see
+// `reset-db.mjs`): it has to happen exactly once, right before the server opens
+// the file, and the config module itself is evaluated by every worker process.
+const BACKEND_CMD =
+  'node frontend/e2e/support/reset-db.mjs && cargo run --manifest-path backend/Cargo.toml'
 const PREVIEW_BUILD = 'npm --prefix frontend run build:only'
 const PREVIEW_ARGS = `--port ${PORT} --strictPort --host ${HOST}`
 const PREVIEW_SERVE = `npm --prefix frontend run preview -- ${PREVIEW_ARGS}`
 const PREVIEW = `${PREVIEW_BUILD} && ${PREVIEW_SERVE}`
 const BACKEND_ENV = {
-  DATABASE_URL: 'sqlite://si-bbs-e2e.db?mode=rwc',
-  GITHUB_MOCK: 'true',
+  DATABASE_URL: E2E_DB_URL,
   JWT_SECRET: 'e2e-test-secret',
 }
 const CI = !!process.env.CI
@@ -22,7 +27,11 @@ const WEB_SERVER = {
   // cwd is the repo root so `cargo run --manifest-path backend/Cargo.toml` and
   // `npm --prefix frontend` both resolve.
   cwd: REPO_ROOT,
-  reuseExistingServer: !CI,
+  // Never adopt a server that is already listening: a running dev instance uses
+  // a different database, and silently reusing it meant the suite wrote test
+  // users and posts into the developer's own data. Failing loudly on a busy
+  // port is the point.
+  reuseExistingServer: false,
   timeout: 600_000,
 }
 const BACKEND_SERVER = { ...WEB_SERVER, env: BACKEND_ENV }

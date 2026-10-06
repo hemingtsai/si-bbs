@@ -5,10 +5,14 @@ test-results
 playwright-report
 blob-report
 coverage
+# E2E scratch database (wiped and recreated by playwright.config.ts on every run)
+/.playwright/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 .env
+.env.*
 .DS_Store
 *.tsbuildinfo
 backend/target/
