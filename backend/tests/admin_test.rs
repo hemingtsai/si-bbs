@@ -136,10 +136,25 @@ async fn stats_counts_users_projects_and_trash() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE wiki_pages SET deleted_at = CURRENT_TIMESTAMP WHERE id = -1")
+    // A published page, plus a second one that is actually binned. The previous
+    // version ran `UPDATE wiki_pages … WHERE id = -1`, which touched nothing, and
+    // then asserted `trashed == 0` — so it could not have noticed a broken count.
+    for (title, slug, status, deleted_at) in [
+        ("published", "published", "published", "NULL"),
+        ("binned", "binned", "published", "CURRENT_TIMESTAMP"),
+    ] {
+        sqlx::query(&format!(
+            "INSERT INTO wiki_pages (title, slug, category, content, status, author_id, deleted_at) \
+             VALUES (?1, ?2, 'c', 'x', ?3, ?4, {deleted_at})"
+        ))
+        .bind(title)
+        .bind(slug)
+        .bind(status)
+        .bind(user_id)
         .execute(&pool)
         .await
         .unwrap();
+    }
 
     let res = server
         .get("/api/admin/stats")
@@ -154,7 +169,10 @@ async fn stats_counts_users_projects_and_trash() {
     assert_eq!(body["projects_pending"], 1);
     assert_eq!(body["comments"], 0);
     assert_eq!(body["ratings"], 0);
-    assert_eq!(body["trashed"], 0);
+    // Only published, non-deleted pages count towards the wiki figure, while the
+    // binned one shows up in the trash count.
+    assert_eq!(body["wiki_published"], 1);
+    assert_eq!(body["trashed"], 1);
 }
 
 #[tokio::test]

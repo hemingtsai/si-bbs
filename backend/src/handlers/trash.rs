@@ -10,8 +10,11 @@ use crate::middleware::auth::{require_auth, require_role};
 use crate::models::user::Role;
 use crate::routes::AppState;
 
-/// The three soft-deletable entity kinds. `trash_view` unions exactly these.
-const KINDS: [&str; 5] = ["wiki", "project", "comment", "forum_post", "forum_comment"];
+/// The soft-deletable entity kinds. `trash_view` unions exactly these, and a test
+/// asserts the two stay in step: a kind present in the view but missing here
+/// cannot be restored or purged, and one listed here but absent from the view
+/// makes both operations answer 404 forever.
+pub const KINDS: [&str; 5] = ["wiki", "project", "comment", "forum_post", "forum_comment"];
 
 /// Map a public kind to its table. Whitelisted so the name can be interpolated
 /// into SQL safely; SQLite cannot bind identifiers.

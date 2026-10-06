@@ -2,7 +2,6 @@ mod common;
 
 use axum_test::TestServer;
 use common::{register_and_login, register_login_as_role, test_ctx};
-use si_bbs_backend::routes::AppState;
 use sqlx::SqlitePool;
 
 /// Each call needs a distinct GitHub URL because the column is UNIQUE even for
@@ -431,34 +430,108 @@ async fn purge_is_admin_only_and_destroys_the_row() {
 }
 
 /// Guard against the trash view drifting away from the handler's whitelist.
+///
+/// The old version iterated a view that had no rows at all, so its loop body
+/// never ran. It now seeds every kind and compares the two lists in both
+/// directions: a kind the view can emit but the handler does not know about
+/// cannot be restored or purged, and a kind the handler lists but the view never
+/// emits answers 404 forever.
 #[tokio::test]
 async fn trash_view_only_contains_known_kinds() {
-    let pool = common::test_pool().await;
-    let rows: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM trash_view")
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let wiki = server
+        .post("/api/wiki")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"title":"t","category":"c","content":"x"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .delete(&format!("/api/wiki/page/{wiki}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    let project = seed_project(&pool, "alice", "approved", "kinds").await;
+    server
+        .delete(&format!("/api/projects/{project}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    let comment = seed_comment(&pool, "alice", project, "hello").await;
+    server
+        .delete(&format!("/api/projects/{project}/comments/{comment}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    let post = server
+        .post("/api/forum/posts")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"board":"life","title":"p","content":"x"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    let reply = server
+        .post(&format!("/api/forum/posts/{post}/comments"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"content":"r"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .delete(&format!("/api/forum/comments/{reply}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    server
+        .delete(&format!("/api/forum/posts/{post}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let mut view_kinds: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM trash_view")
         .fetch_all(&pool)
         .await
         .unwrap();
-    for kind in rows {
-        assert!(
-            ["wiki", "project", "comment", "forum_post", "forum_comment"].contains(&kind.as_str()),
-            "unexpected kind {kind}"
-        );
-    }
+    view_kinds.sort();
+    let mut handler_kinds: Vec<String> = si_bbs_backend::handlers::trash::KINDS
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    handler_kinds.sort();
+
+    assert_eq!(view_kinds, handler_kinds);
 }
 
-/// The binary must keep building against the same router the tests exercise.
+/// The binary must keep building against the same router the tests exercise, and
+/// that router must actually serve the trash endpoints. The previous version only
+/// constructed a router and dropped it, so deleting every trash route still passed.
 #[tokio::test]
 async fn trash_routes_are_mounted_in_the_shared_router() {
-    let pool = common::test_pool().await;
-    let cfg = si_bbs_backend::config::Config {
-        database_url: "sqlite::memory:".into(),
-        jwt_secret: "test-secret".into(),
-        access_ttl_secs: 900,
-        refresh_ttl_secs: 7 * 24 * 3600,
-        github_token: String::new(),
-        github_api_base: "https://api.github.com".into(),
-    };
-    let _router: axum::Router = si_bbs_backend::create_router(AppState::new(pool, cfg));
+    let (server, _pool) = test_ctx().await;
+
+    // 401 rather than 404: the route exists and asks for a token.
+    for (method, path) in [
+        ("GET", "/api/trash".to_string()),
+        ("POST", "/api/trash/wiki/1/restore".to_string()),
+        ("DELETE", "/api/trash/wiki/1".to_string()),
+        // An unknown kind is only distinguishable from an unmounted route once
+        // the caller is authenticated; the integration tests cover that.
+    ] {
+        let res = match method {
+            "GET" => server.get(&path).await,
+            "POST" => server.post(&path).await,
+            _ => server.delete(&path).await,
+        };
+        assert_eq!(
+            res.status_code(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{method} {path} is not mounted"
+        );
+    }
 }
 
 /// Regression: `comments.project_id` and `ratings.project_id` have no

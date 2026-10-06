@@ -258,12 +258,16 @@ async fn featured_posts_sort_first() {
     let (server, pool) = test_ctx().await;
     let alice = register_and_login(&server, "alice").await;
     let mod_token = register_login_as_role(&server, &pool, "mod", "moderator").await;
-    let a = create_post(&server, &alice, "tools", "普通")
+    // The featured post is created *first*, so it has the smaller id. If the
+    // listing ignored `is_featured`, `created_at DESC, id DESC` would put the
+    // newer plain post on top and this test would fail — featuring the newer post
+    // instead would make the assertion pass even with the feature removed.
+    let featured = create_post(&server, &alice, "tools", "被精选")
         .await
         .json::<serde_json::Value>()["id"]
         .as_i64()
         .unwrap();
-    let b = create_post(&server, &alice, "tools", "被精选")
+    let plain = create_post(&server, &alice, "tools", "普通")
         .await
         .json::<serde_json::Value>()["id"]
         .as_i64()
@@ -271,14 +275,14 @@ async fn featured_posts_sort_first() {
 
     // A plain user cannot feature.
     server
-        .patch(&format!("/api/forum/posts/{b}/featured"))
+        .patch(&format!("/api/forum/posts/{featured}/featured"))
         .add_header("Authorization", format!("Bearer {alice}"))
         .json(&serde_json::json!({ "featured": true }))
         .await
         .assert_status(axum::http::StatusCode::FORBIDDEN);
 
     let res = server
-        .patch(&format!("/api/forum/posts/{b}/featured"))
+        .patch(&format!("/api/forum/posts/{featured}/featured"))
         .add_header("Authorization", format!("Bearer {mod_token}"))
         .json(&serde_json::json!({ "featured": true }))
         .await;
@@ -287,8 +291,22 @@ async fn featured_posts_sort_first() {
 
     let res = server.get("/api/forum/posts?board=tools").await;
     let items = res.json::<serde_json::Value>()["items"].clone();
-    assert_eq!(items[0]["id"], b);
-    assert_eq!(items[1]["id"], a);
+    assert_eq!(items[0]["id"], featured);
+    assert_eq!(items[1]["id"], plain);
+
+    // Un-featuring puts it back in normal order.
+    server
+        .patch(&format!("/api/forum/posts/{featured}/featured"))
+        .add_header("Authorization", format!("Bearer {mod_token}"))
+        .json(&serde_json::json!({ "featured": false }))
+        .await
+        .assert_status_ok();
+    let items = server
+        .get("/api/forum/posts?board=tools")
+        .await
+        .json::<serde_json::Value>()["items"]
+        .clone();
+    assert_eq!(items[0]["id"], plain);
 }
 
 #[tokio::test]

@@ -15,17 +15,20 @@ cargo test --test project_test
 SQLite 用 `:memory:`，每个测试一份库。GitHub 请求通过 `GITHUB_API_BASE`
 指向 `wiremock` 起的 mock 服务器，不打真实 GitHub。
 
-测试文件与覆盖范围：
+测试文件与覆盖范围（当前共 134 条：`cargo test` 逐二进制计数）：
 
 | 文件 | 覆盖 |
 | --- | --- |
-| `tests/auth_test.rs` | 注册 201、登录、错误密码 401、重复注册 409、未登录 401 |
+| `tests/auth_test.rs` | 注册 201、登录、错误密码 401、重复注册 409、未登录 401；大小写重复 409、用户名/邮箱/密码边界 400、登录失败限流 429 与 `Retry-After`、成功登录清零配额 |
 | `tests/project_test.rs` | URL 解析、提交、去重 409、审核队列、README 24h 懒刷新与失败回退、token 透传 |
 | `tests/rating_comment_test.rs` | 评分 upsert/越界 400、评论发布/空白 400、软删除后列表不可见 |
 | `tests/wiki_test.rs` | slug 生成与去重、草稿可见性、作者/staff 权限、软删除 |
-| `tests/trash_test.rs` | 软删除进回收站、恢复、权限、admin 才能彻底删除、唯一键占用 |
-| `tests/admin_test.rs` | 用户列表分页/搜索、改角色即时生效、refresh 不复活旧角色、封禁 |
-| `tests/db_test.rs` | 迁移能跑完、表结构齐全 |
+| `tests/forum_test.rs` | 板块、免审核发帖/回帖、编辑删除权限、精选排序、板规；并发点赞计数一致性、回复计数派生 |
+| `tests/trash_test.rs` | 软删除进回收站、恢复、权限、admin 才能彻底删除、唯一键占用；有评论/评分/回复时的级联彻底删除 |
+| `tests/admin_test.rs` | 用户列表分页/搜索、改角色即时生效、refresh 不复活旧角色、封禁、统计计数 |
+| `tests/db_test.rs` | 迁移能跑完、表结构齐全、计数列已删除、回收站视图聚合五种 kind、测试库强制外键 |
+| `tests/static_files_test.rs` | SPA 深链回退、`/assets/*` immutable 缓存、安全头、JSON 404、预压缩件按 `Accept-Encoding` 送达 |
+| `tests/health_test.rs` | `/api/health` 正常 200、数据库不可用时 503 |
 
 ## 2. 前端单元测试（Vitest）
 
