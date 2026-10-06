@@ -10,6 +10,7 @@ export const E2E_DB_DIR = resolve(REPO_ROOT, '.playwright')
 export const E2E_DB_FILE = resolve(E2E_DB_DIR, 'si-bbs-e2e.db')
 export const E2E_DB_URL = `sqlite://${E2E_DB_FILE}?mode=rwc`
 
+
 /**
  * Grant a role by writing to the database directly.
  *

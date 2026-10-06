@@ -14,7 +14,12 @@ import { promoteUser } from './support/db'
  * yet — see `docs/testing.md`.
  */
 const API = 'http://127.0.0.1:3000'
-const RUN = Date.now().toString(36)
+// Fixed per-run-suffix instead of a timestamp: Playwright evaluates a test module in
+// several processes, so a module-level `Date.now()` differs between tests of the same
+// file, and a test that signs in as a user an earlier test created would get a 401.
+// The database is wiped before every run (see `support/reset-db.mjs`), so names only
+// need to be unique *within* a run.
+const RUN = 'api'
 const PASSWORD = 'password123'
 
 // Distinct account per case: registration is case-insensitively unique, so tests

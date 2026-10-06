@@ -11,7 +11,9 @@ import { promoteUser } from './support/db'
  * test walks through.
  */
 const API = 'http://127.0.0.1:3000'
-const RUN = Date.now().toString(36)
+// Stable suffix, not a timestamp: see the note in `forum.e2e.ts`. The database is
+// wiped per run, so uniqueness only has to hold within this file.
+const RUN = 'uip'
 const PASSWORD = 'password123'
 
 const USER = `up_${RUN}`
@@ -375,4 +377,41 @@ test('首页汇总最新帖子、新收录项目与最近 Wiki 变更', async ({
   await page.getByRole('link', { name: new RegExp(`首页帖子_${RUN}`) }).click()
   await expect(page).toHaveURL(/\/forum\/\d+$/)
   await expect(page.getByText('正文')).toBeVisible()
+})
+
+test('长回复串分页加载，而不是永远只显示第一页', async ({ page }) => {
+  const author = `up2_${RUN}`
+  await registerAndLogin(page, author)
+
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`分页测试帖_${RUN}`)
+  await page.getByLabel('正文').fill('正文')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/(\d+)$/)
+  const postId = Number(new URL(page.url()).pathname.split('/').pop())
+
+  // 25 replies through the API: past the 20-per-page the UI asks for.
+  const ctx = await request.newContext({ baseURL: API })
+  const login = await ctx.post('/api/auth/login', {
+    data: { username: author, password: PASSWORD },
+  })
+  const { access_token: token } = (await login.json()) as { access_token: string }
+  for (let i = 1; i <= 25; i += 1) {
+    const res = await ctx.post(`/api/forum/posts/${postId}/comments`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { content: `第 ${i} 条回复` },
+    })
+    expect(res.status()).toBe(201)
+  }
+  await ctx.dispose()
+
+  await page.goto(`/forum/${postId}`)
+  // The first page shows the newest 20 of 25 and says so.
+  await expect(page.getByText('回复（20 / 25）')).toBeVisible()
+  await expect(page.getByRole('button', { name: /加载更多回复/ })).toBeVisible()
+
+  await page.getByRole('button', { name: /加载更多回复/ }).click()
+  await expect(page.getByText('回复（25 / 25）')).toBeVisible()
+  // The button disappears once everything is loaded — no dead control left behind.
+  await expect(page.getByRole('button', { name: /加载更多回复/ })).toHaveCount(0)
 })

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { commentsApi, projectsApi, ratingsApi } from '../../api'
+import { apiError } from '../../lib/errors'
 import type { Comment, Project, RatingSummary } from '../../api/types'
 import MarkdownView from '../../components/MarkdownView.vue'
 import ReportButton from '../../components/ReportButton.vue'
@@ -16,6 +17,10 @@ const projectId = Number(route.params.id)
 const project = ref<Project | null>(null)
 const summary = ref<RatingSummary | null>(null)
 const comments = ref<Comment[]>([])
+const commentsPage = ref(1)
+const commentsTotal = ref(0)
+const moreCommentsError = ref('')
+const COMMENT_PAGE_SIZE = 20
 const loading = ref(true)
 const error = ref('')
 
@@ -38,15 +43,33 @@ async function load(): Promise<void> {
     if (projectRes.data.status === 'approved') {
       const [summaryRes, commentsRes] = await Promise.all([
         ratingsApi.summary(projectId),
-        commentsApi.list(projectId, { per_page: 50 }),
+        commentsApi.list(projectId, { page: 1, per_page: COMMENT_PAGE_SIZE }),
       ])
       summary.value = summaryRes.data
       comments.value = commentsRes.data.items
+      commentsPage.value = 1
+      commentsTotal.value = commentsRes.data.total
     }
   } catch {
     error.value = '项目不存在或已下架'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMoreComments(): Promise<void> {
+  moreCommentsError.value = ''
+  try {
+    const next = commentsPage.value + 1
+    const { data } = await commentsApi.list(projectId, {
+      page: next,
+      per_page: COMMENT_PAGE_SIZE,
+    })
+    comments.value = [...comments.value, ...data.items]
+    commentsPage.value = next
+    commentsTotal.value = data.total
+  } catch (err: unknown) {
+    moreCommentsError.value = apiError(err, '加载更多评论失败')
   }
 }
 
@@ -72,6 +95,7 @@ async function submitComment(): Promise<void> {
   try {
     const { data } = await commentsApi.create(projectId, content)
     comments.value.push(data)
+    commentsTotal.value += 1
     newComment.value = ''
   } catch (err: unknown) {
     commentError.value =
@@ -151,7 +175,7 @@ onMounted(load)
     </div>
 
     <div v-if="project.status === 'approved'" class="section">
-      <div class="section-title">评论</div>
+      <div class="section-title">评论（{{ comments.length }} / {{ commentsTotal }}）</div>
       <div class="list">
         <div v-for="comment in comments" :key="comment.id" class="list-row" style="cursor: default">
           <div class="row-main">
@@ -173,6 +197,15 @@ onMounted(load)
           />
         </div>
         <p v-if="comments.length === 0" class="meta" style="margin: 8px 0">还没有评论。</p>
+        <p v-if="moreCommentsError" class="error">{{ moreCommentsError }}</p>
+        <button
+          v-if="comments.length < commentsTotal"
+          class="btn"
+          style="margin-top: 8px"
+          @click="loadMoreComments"
+        >
+          加载更多评论（已显示 {{ comments.length }} / {{ commentsTotal }}）
+        </button>
       </div>
 
       <form v-if="auth.isAuthenticated" class="form-stack" style="margin-top: 12px" @submit.prevent="submitComment">

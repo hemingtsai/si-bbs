@@ -12,4 +12,5 @@ import { fileURLToPath } from 'node:url'
 const dir = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..', '.playwright')
 rmSync(dir, { recursive: true, force: true })
 mkdirSync(dir, { recursive: true })
+
 console.log(`[e2e] reset database directory ${dir}`)

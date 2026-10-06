@@ -14,7 +14,10 @@ import { promoteUser } from './support/db'
  * name carries a per-run suffix.
  */
 const API = 'http://127.0.0.1:3000'
-const RUN = Date.now().toString(36)
+// Stable suffix, not a timestamp: see the note in `forum.e2e.ts`. Tests in this file
+// reuse accounts created by earlier tests, which only works if every evaluation of
+// this module agrees on the names.
+const RUN = 'uif'
 const PASSWORD = 'password123'
 
 const AUTHOR = `ua_${RUN}`
@@ -69,7 +72,9 @@ async function apiToken(username: string): Promise<string> {
     const res = await ctx.post('/api/auth/login', {
       data: { username, password: PASSWORD },
     })
-    expect(res.status()).toBe(200)
+    if (res.status() !== 200) {
+      throw new Error(`login for ${username} failed: ${res.status()} ${await res.text()}`)
+    }
     return (await res.json()).access_token
   } finally {
     await ctx.dispose()
@@ -112,7 +117,7 @@ test('浏览器里走完注册 → 发帖 → 点赞 → 回复 → 列表可见
   await page.getByPlaceholder('写下你的回复').fill('沙发')
   await page.getByRole('button', { name: '回复' }).click()
   await expect(page.getByText('沙发')).toBeVisible()
-  await expect(page.getByText('回复（1）')).toBeVisible()
+  await expect(page.getByText('回复（1 / 1）')).toBeVisible()
 
   // And the list reflects both counters.
   await page.getByRole('link', { name: '论坛' }).click()
@@ -123,8 +128,15 @@ test('浏览器里走完注册 → 发帖 → 点赞 → 回复 → 列表可见
 })
 
 test('未登录访客能看到内容，但看不到点赞入口，只看到登录提示', async ({ page }) => {
-  const token = await apiToken(AUTHOR)
+  // Its own account: leaning on a user another test created made this case fail
+  // whenever it was run on its own (`-g`), which is a confusing way to find out.
+  const owner = `uv_${RUN}`
+  await registerAndLogin(page, owner)
+  const token = await apiToken(owner)
   const id = await createPostViaApi(token, `匿名可见 ${RUN}`)
+
+  // Back to being a stranger: same browser context, no session.
+  await page.getByRole('button', { name: '退出' }).click()
 
   await page.goto(`/forum/${id}`)
   await expect(page.getByRole('heading', { name: `匿名可见 ${RUN}` })).toBeVisible()

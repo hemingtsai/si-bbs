@@ -152,7 +152,7 @@ export const forumApi = {
   like: (id: number) => api.post<{ liked: boolean; likes_count: number }>(`/forum/posts/${id}/like`),
   setFeatured: (id: number, featured: boolean) =>
     api.patch<ForumPost>(`/forum/posts/${id}/featured`, { featured }),
-  comments: (id: number, params?: { page?: number }) =>
+  comments: (id: number, params?: { page?: number; per_page?: number }) =>
     api.get<Page<ForumComment>>(`/forum/posts/${id}/comments`, { params }),
   createComment: (id: number, content: string) =>
     api.post<ForumComment>(`/forum/posts/${id}/comments`, { content }),

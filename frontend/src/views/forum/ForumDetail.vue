@@ -15,12 +15,37 @@ const auth = useAuthStore()
 
 const post = ref<ForumPost | null>(null)
 const comments = ref<ForumComment[]>([])
+/// Replies are paged: the API caps a page at 100 and silently returning the first
+/// page forever made long threads look truncated.
+const commentsPage = ref(1)
+const commentsTotal = ref(0)
+const moreCommentsError = ref('')
 const loading = ref(true)
 const error = ref('')
 const newComment = ref('')
 const commentError = ref('')
 
 const postId = computed(() => Number(route.params.id))
+
+const COMMENT_PAGE_SIZE = 20
+
+async function loadMoreComments(): Promise<void> {
+  moreCommentsError.value = ''
+  try {
+    const next = commentsPage.value + 1
+    const { data } = await forumApi.comments(postId.value, {
+      page: next,
+      per_page: COMMENT_PAGE_SIZE,
+    })
+    // Append rather than replace: the reader is scrolling a thread, not paging a
+    // table.
+    comments.value = [...comments.value, ...data.items]
+    commentsPage.value = next
+    commentsTotal.value = data.total
+  } catch (err: unknown) {
+    moreCommentsError.value = apiError(err, '加载更多回复失败')
+  }
+}
 const liked = ref(false)
 
 const boardLabel: Record<string, string> = { models: '模型讨论', tools: '工具交流', life: '谈天说地' }
@@ -31,10 +56,12 @@ async function load(): Promise<void> {
   try {
     const [postRes, commentsRes] = await Promise.all([
       forumApi.detail(postId.value),
-      forumApi.comments(postId.value),
+      forumApi.comments(postId.value, { page: 1, per_page: COMMENT_PAGE_SIZE }),
     ])
     post.value = postRes.data
     comments.value = commentsRes.data.items
+    commentsPage.value = 1
+    commentsTotal.value = commentsRes.data.total
   } catch {
     error.value = '帖子不存在或已删除'
   } finally {
@@ -72,6 +99,7 @@ async function submitComment(): Promise<void> {
   try {
     const { data } = await forumApi.createComment(postId.value, content)
     comments.value.push(data)
+    commentsTotal.value += 1
     newComment.value = ''
   } catch (err: unknown) {
     commentError.value = apiError(err, '回复失败')
@@ -133,7 +161,7 @@ onMounted(load)
     <MarkdownView :source="post.content" />
 
     <div class="section">
-      <div class="section-title">回复（{{ comments.length }}）</div>
+      <div class="section-title">回复（{{ comments.length }} / {{ commentsTotal }}）</div>
       <div class="list">
         <div v-for="c in comments" :key="c.id" class="list-row" style="cursor: default">
           <div class="row-main">
@@ -160,6 +188,15 @@ onMounted(load)
           </button>
         </div>
         <p v-if="comments.length === 0" class="meta" style="margin: 8px 0">还没有回复。</p>
+        <p v-if="moreCommentsError" class="error">{{ moreCommentsError }}</p>
+        <button
+          v-if="comments.length < commentsTotal"
+          class="btn"
+          style="margin-top: 8px"
+          @click="loadMoreComments"
+        >
+          加载更多回复（已显示 {{ comments.length }} / {{ commentsTotal }}）
+        </button>
       </div>
 
       <form v-if="auth.isAuthenticated" class="form-stack" style="margin-top: 12px" @submit.prevent="submitComment">
