@@ -128,6 +128,16 @@ Debian/Ubuntu/Alpine/甚至 scratch 容器里都能直接跑。
    只有形态 2 才能命中预压缩件，也只有它能在 STATIC_DIR 为空时正确回退——
    形态 1 的纯反代写法会让 `/forum/1` 的刷新直接落到后端的 JSON 404。
 
+**按 IP 限流只能在代理层做。** 应用看不到客户端 IP（没有 `ConnectInfo`，也不读
+`X-Forwarded-For`），它的限流是按账号/按进程的。`nginx/si-bbs.conf` 因此给
+`/api/auth/`（`10r/m` + burst 5）和 `/api/`（`20r/s` + burst 40）各配了一个
+`limit_req_zone`，超限返回 429。Caddy 标准发行版没有限流指令，需要
+`caddy-ratelimit` 插件。
+
+两份代理配置都在容器里做过语法校验（`nginx -t`、`caddy validate`）；
+nginx 那份还在容器里实测过：`/forum/1` 返回 `index.html`、
+`/assets/*` 带 `Cache-Control: immutable` 与全部安全头、`/` 是 `no-cache`。
+
 ## 升级与备份
 
 - **备份**：先 `PRAGMA wal_checkpoint(TRUNCATE)`（或正常停服，停机流程会自动
