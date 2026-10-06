@@ -49,7 +49,7 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 | --- | --- | --- |
 | `PORT` | `3000` | 监听端口（当前代码硬编码 3000，注意） |
 | `DATABASE_URL` | `sqlite:///data/si-bbs.db?mode=rwc` | SQLite 路径 |
-| `JWT_SECRET` | `dev-secret-change-me` | **生产必改**，`openssl rand -hex 32` |
+| `JWT_SECRET` | 开发构建：`dev-secret-change-me`；**release 构建：无默认值** | 生成用 `openssl rand -hex 32`。release 二进制在缺省、仍是开发值、或短于 32 字节时**直接拒绝启动**（`fatal: JWT_SECRET ...`，退出码 1），因为该默认值是公开字符串，任何人都能据此伪造管理员 token。 |
 | `ACCESS_TTL_SECS` | `900` | access token 有效期 |
 | `REFRESH_TTL_SECS` | `604800` | refresh token 有效期 |
 | `GITHUB_TOKEN` | 空 | GitHub API 令牌，提高限速（可选但推荐） |
