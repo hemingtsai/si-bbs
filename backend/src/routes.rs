@@ -59,6 +59,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/forum/posts/{id}/comments", get(forum::list_comments).post(forum::create_comment))
         .route("/api/forum/comments/{id}", axum::routing::delete(forum::delete_comment))
         .route("/api/forum/comments/{id}/like", post(forum::like_comment))
+        .route("/api/forum/posts/{id}/featured", axum::routing::patch(forum::set_featured))
+        .route("/api/forum/rules", get(forum::rules))
+        .route("/api/forum/rules/{board}", axum::routing::put(forum::upsert_rule))
         // Administration.
         .route("/api/admin/users", get(admin::list_users))
         .route(

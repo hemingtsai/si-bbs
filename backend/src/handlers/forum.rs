@@ -208,88 +208,27 @@ pub async fn delete_post(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Toggle a like on a post.
-pub async fn like_post(
+/// Staff toggles the "featured" flag. Featured posts sort first in lists.
+pub async fn set_featured(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    toggle_like(state, headers, "post", id).await
-}
+    Json(input): Json<FeaturedInput>,
+) -> Result<Json<ForumPostOut>, AppError> {
+    require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
 
-async fn toggle_like(
-    state: AppState,
-    headers: HeaderMap,
-    kind: &str,
-    id: i64,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let claims = require_auth(&state.cfg, &headers)?;
-    let (table, id_col) = match kind {
-        "post" => ("forum_posts", "id"),
-        "comment" => ("forum_comments", "id"),
-        _ => return Err(AppError::NotFound),
-    };
-
-    // Target must exist and be live.
-    let exists: Option<i64> = sqlx::query_scalar(&format!(
-        "SELECT id FROM {table} WHERE {id_col} = ?1 AND deleted_at IS NULL"
-    ))
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await?;
-    if exists.is_none() {
-        return Err(AppError::NotFound);
-    }
-
-    let deleted: Option<i64> = sqlx::query_scalar(
-        "DELETE FROM forum_likes WHERE user_id = ?1 AND target_kind = ?2 AND target_id = ?3 RETURNING user_id",
+    let res = sqlx::query(
+        "UPDATE forum_posts SET is_featured = ?2, updated_at = CURRENT_TIMESTAMP \
+         WHERE id = ?1 AND deleted_at IS NULL",
     )
-    .bind(claims.sub)
-    .bind(kind)
     .bind(id)
-    .fetch_optional(&state.pool)
-    .await?;
-
-    let liked = if deleted.is_some() {
-        liked_delta(&state, table, id, -1).await?;
-        false
-    } else {
-        sqlx::query(
-            "INSERT OR IGNORE INTO forum_likes (user_id, target_kind, target_id) VALUES (?1, ?2, ?3)",
-        )
-        .bind(claims.sub)
-        .bind(kind)
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
-        liked_delta(&state, table, id, 1).await?;
-        true
-    };
-
-    let likes: i64 = sqlx::query_scalar(&format!(
-        "SELECT likes_count FROM {table} WHERE {id_col} = ?1"
-    ))
-    .bind(id)
-    .fetch_one(&state.pool)
-    .await?;
-
-    Ok(Json(serde_json::json!({ "liked": liked, "likes_count": likes })))
-}
-
-async fn liked_delta(
-    state: &AppState,
-    table: &str,
-    id: i64,
-    delta: i64,
-) -> Result<(), AppError> {
-    sqlx::query(&format!(
-        "UPDATE {table} SET likes_count = MAX(likes_count + ?2, 0) WHERE id = ?1"
-    ))
-    .bind(id)
-    .bind(delta)
+    .bind(if input.featured { 1 } else { 0 })
     .execute(&state.pool)
     .await?;
-    Ok(())
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(fetch_post(&state, id).await?))
 }
 
 /// Comments for one post, oldest first.
@@ -406,6 +345,90 @@ pub async fn delete_comment(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Toggle a like on a post.
+pub async fn like_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    toggle_like(state, headers, "post", id).await
+}
+
+async fn toggle_like(
+    state: AppState,
+    headers: HeaderMap,
+    kind: &str,
+    id: i64,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let (table, id_col) = match kind {
+        "post" => ("forum_posts", "id"),
+        "comment" => ("forum_comments", "id"),
+        _ => return Err(AppError::NotFound),
+    };
+
+    // Target must exist and be live.
+    let exists: Option<i64> = sqlx::query_scalar(&format!(
+        "SELECT id FROM {table} WHERE {id_col} = ?1 AND deleted_at IS NULL"
+    ))
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let deleted: Option<i64> = sqlx::query_scalar(
+        "DELETE FROM forum_likes WHERE user_id = ?1 AND target_kind = ?2 AND target_id = ?3 RETURNING user_id",
+    )
+    .bind(claims.sub)
+    .bind(kind)
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let liked = if deleted.is_some() {
+        liked_delta(&state, table, id, -1).await?;
+        false
+    } else {
+        sqlx::query(
+            "INSERT OR IGNORE INTO forum_likes (user_id, target_kind, target_id) VALUES (?1, ?2, ?3)",
+        )
+        .bind(claims.sub)
+        .bind(kind)
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+        liked_delta(&state, table, id, 1).await?;
+        true
+    };
+
+    let likes: i64 = sqlx::query_scalar(&format!(
+        "SELECT likes_count FROM {table} WHERE {id_col} = ?1"
+    ))
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({ "liked": liked, "likes_count": likes })))
+}
+
+async fn liked_delta(
+    state: &AppState,
+    table: &str,
+    id: i64,
+    delta: i64,
+) -> Result<(), AppError> {
+    sqlx::query(&format!(
+        "UPDATE {table} SET likes_count = MAX(likes_count + ?2, 0) WHERE id = ?1"
+    ))
+    .bind(id)
+    .bind(delta)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
 /// Toggle a like on a comment.
 pub async fn like_comment(
     State(state): State<AppState>,
@@ -413,6 +436,86 @@ pub async fn like_comment(
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     toggle_like(state, headers, "comment", id).await
+}
+
+/// Rules: the global rules plus (optionally) one board's rules.
+pub async fn rules(
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<Vec<ForumRule>>, AppError> {
+    let board = match q.board.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(raw) => {
+            if raw == "global" {
+                None
+            } else {
+                Some(Board::parse(raw).ok_or_else(|| {
+                    AppError::BadRequest("board must be global, models, tools or life".into())
+                })?)
+            }
+        }
+    };
+
+    let rows: Vec<ForumRule> = match board {
+        None => {
+            sqlx::query_as(
+                "SELECT board, title, content, updated_by, updated_at FROM forum_rules ORDER BY board",
+            )
+            .fetch_all(&state.pool)
+            .await?
+        }
+        Some(b) => {
+            sqlx::query_as(
+                "SELECT board, title, content, updated_by, updated_at FROM forum_rules \
+                 WHERE board IN ('global', ?1) ORDER BY board",
+            )
+            .bind(b.as_str())
+            .fetch_all(&state.pool)
+            .await?
+        }
+    };
+    Ok(Json(rows))
+}
+
+/// Staff replaces a board's rules. `board` path param accepts 'global' too.
+pub async fn upsert_rule(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(board): Path<String>,
+    Json(input): Json<RuleInput>,
+) -> Result<Json<ForumRule>, AppError> {
+    let claims = require_role(&state, &headers, &[Role::Admin, Role::Moderator]).await?;
+    if board != "global" && Board::parse(&board).is_none() {
+        return Err(AppError::BadRequest(
+            "board must be global, models, tools or life".into(),
+        ));
+    }
+    let title = input.title.trim();
+    let content = input.content.trim();
+    if title.is_empty() || content.is_empty() {
+        return Err(AppError::BadRequest("title and content are required".into()));
+    }
+
+    sqlx::query(
+        "INSERT INTO forum_rules (board, title, content, updated_by, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP) \
+         ON CONFLICT(board) DO UPDATE SET title = excluded.title, content = excluded.content, \
+         updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP",
+    )
+    .bind(&board)
+    .bind(title)
+    .bind(content)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+
+    let rule: ForumRule = sqlx::query_as(
+        "SELECT board, title, content, updated_by, updated_at FROM forum_rules WHERE board = ?1",
+    )
+    .bind(&board)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Json(rule))
 }
 
 async fn fetch_post(state: &AppState, id: i64) -> Result<ForumPostOut, AppError> {
