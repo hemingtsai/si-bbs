@@ -11,7 +11,17 @@ async fn migrations_apply_cleanly() {
     .unwrap();
     assert_eq!(
         tables,
-        vec!["comments", "forum_comments", "forum_likes", "forum_posts", "forum_rules", "projects", "ratings", "users", "wiki_pages"]
+        vec![
+            "comments",
+            "forum_comments",
+            "forum_likes",
+            "forum_posts",
+            "forum_rules",
+            "projects",
+            "ratings",
+            "users",
+            "wiki_pages"
+        ]
     );
 }
 

@@ -53,15 +53,35 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::delete(trash::purge),
         )
         .route("/api/forum/boards", get(forum::boards))
-        .route("/api/forum/posts", get(forum::list_posts).post(forum::create_post))
-        .route("/api/forum/posts/{id}", get(forum::get_post).patch(forum::update_post).delete(forum::delete_post))
+        .route(
+            "/api/forum/posts",
+            get(forum::list_posts).post(forum::create_post),
+        )
+        .route(
+            "/api/forum/posts/{id}",
+            get(forum::get_post)
+                .patch(forum::update_post)
+                .delete(forum::delete_post),
+        )
         .route("/api/forum/posts/{id}/like", post(forum::like_post))
-        .route("/api/forum/posts/{id}/comments", get(forum::list_comments).post(forum::create_comment))
-        .route("/api/forum/comments/{id}", axum::routing::delete(forum::delete_comment))
+        .route(
+            "/api/forum/posts/{id}/comments",
+            get(forum::list_comments).post(forum::create_comment),
+        )
+        .route(
+            "/api/forum/comments/{id}",
+            axum::routing::delete(forum::delete_comment),
+        )
         .route("/api/forum/comments/{id}/like", post(forum::like_comment))
-        .route("/api/forum/posts/{id}/featured", axum::routing::patch(forum::set_featured))
+        .route(
+            "/api/forum/posts/{id}/featured",
+            axum::routing::patch(forum::set_featured),
+        )
         .route("/api/forum/rules", get(forum::rules))
-        .route("/api/forum/rules/{board}", axum::routing::put(forum::upsert_rule))
+        .route(
+            "/api/forum/rules/{board}",
+            axum::routing::put(forum::upsert_rule),
+        )
         // Administration.
         .route("/api/admin/users", get(admin::list_users))
         .route(

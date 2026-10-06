@@ -1,10 +1,13 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
 
 use crate::error::AppError;
 use crate::middleware::auth::{require_auth, require_role};
-use crate::models::forum::{Board, BoardInfo, CommentInput, FeaturedInput, ForumComment, ForumPostOut, ForumRule, ListQuery, PostInput, RuleInput};
+use crate::models::forum::{
+    Board, BoardInfo, CommentInput, FeaturedInput, ForumComment, ForumPostOut, ForumRule,
+    ListQuery, PostInput, RuleInput,
+};
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
@@ -66,18 +69,18 @@ pub async fn list_posts(
 ) -> Result<Json<Page<ForumPostOut>>, AppError> {
     let per_page = q.per_page.unwrap_or(20).clamp(1, 100);
     let page = q.page.unwrap_or(1).max(1);
-    let board = match q.board.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        None => None,
-        Some(raw) => Some(Board::parse(raw).ok_or_else(|| {
-            AppError::BadRequest("board must be models, tools or life".into())
-        })?),
-    };
-    let keyword = q
-        .q
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| format!("%{s}%"));
+    let board =
+        match q.board.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            None => None,
+            Some(raw) => Some(Board::parse(raw).ok_or_else(|| {
+                AppError::BadRequest("board must be models, tools or life".into())
+            })?),
+        };
+    let keyword =
+        q.q.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("%{s}%"));
 
     let filters = "p.deleted_at IS NULL \
                    AND (?1 IS NULL OR p.board = ?1) \
@@ -286,14 +289,13 @@ pub async fn create_comment(
     }
     fetch_post(&state, id).await?;
 
-    let res = sqlx::query(
-        "INSERT INTO forum_comments (post_id, author_id, content) VALUES (?1, ?2, ?3)",
-    )
-    .bind(id)
-    .bind(claims.sub)
-    .bind(content)
-    .execute(&state.pool)
-    .await?;
+    let res =
+        sqlx::query("INSERT INTO forum_comments (post_id, author_id, content) VALUES (?1, ?2, ?3)")
+            .bind(id)
+            .bind(claims.sub)
+            .bind(content)
+            .execute(&state.pool)
+            .await?;
     let comment_id = res.last_insert_rowid();
 
     sqlx::query("UPDATE forum_posts SET comments_count = comments_count + 1 WHERE id = ?1")
@@ -410,15 +412,12 @@ async fn toggle_like(
     .fetch_one(&state.pool)
     .await?;
 
-    Ok(Json(serde_json::json!({ "liked": liked, "likes_count": likes })))
+    Ok(Json(
+        serde_json::json!({ "liked": liked, "likes_count": likes }),
+    ))
 }
 
-async fn liked_delta(
-    state: &AppState,
-    table: &str,
-    id: i64,
-    delta: i64,
-) -> Result<(), AppError> {
+async fn liked_delta(state: &AppState, table: &str, id: i64, delta: i64) -> Result<(), AppError> {
     sqlx::query(&format!(
         "UPDATE {table} SET likes_count = MAX(likes_count + ?2, 0) WHERE id = ?1"
     ))
@@ -457,13 +456,11 @@ pub async fn rules(
     };
 
     let rows: Vec<ForumRule> = match board {
-        None => {
-            sqlx::query_as(
-                "SELECT board, title, content, updated_by, updated_at FROM forum_rules ORDER BY board",
-            )
-            .fetch_all(&state.pool)
-            .await?
-        }
+        None => sqlx::query_as(
+            "SELECT board, title, content, updated_by, updated_at FROM forum_rules ORDER BY board",
+        )
+        .fetch_all(&state.pool)
+        .await?,
         Some(b) => {
             sqlx::query_as(
                 "SELECT board, title, content, updated_by, updated_at FROM forum_rules \
@@ -493,7 +490,9 @@ pub async fn upsert_rule(
     let title = input.title.trim();
     let content = input.content.trim();
     if title.is_empty() || content.is_empty() {
-        return Err(AppError::BadRequest("title and content are required".into()));
+        return Err(AppError::BadRequest(
+            "title and content are required".into(),
+        ));
     }
 
     sqlx::query(
@@ -519,9 +518,7 @@ pub async fn upsert_rule(
 }
 
 async fn fetch_post(state: &AppState, id: i64) -> Result<ForumPostOut, AppError> {
-    let sql = format!(
-        "{POST_SELECT} WHERE p.id = ?1 AND p.deleted_at IS NULL"
-    );
+    let sql = format!("{POST_SELECT} WHERE p.id = ?1 AND p.deleted_at IS NULL");
     sqlx::query_as::<_, ForumPostOut>(&sql)
         .bind(id)
         .fetch_optional(&state.pool)
