@@ -21,7 +21,7 @@ pub struct ListQuery {
     pub per_page: Option<i64>,
 }
 
-const COMMENT_SELECT: &str = "SELECT c.id, c.project_id, c.user_id, u.username, c.content, \
+const COMMENT_SELECT: &str = "SELECT c.id, c.project_id, c.user_id, COALESCE(u.display_name, u.username) AS username, c.content, \
      c.created_at FROM comments c JOIN users u ON u.id = c.user_id";
 
 /// Post a comment on an approved project. Login required.

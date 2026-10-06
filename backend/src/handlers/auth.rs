@@ -327,3 +327,107 @@ pub async fn change_email(
 
     Ok(Json(serde_json::json!({ "email": email })))
 }
+
+#[derive(Deserialize)]
+pub struct ProfileInput {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+/// Update the caller's own profile. Every field is optional; an omitted field is
+/// left alone, while an empty string clears it.
+pub async fn update_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ProfileInput>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state, &headers).await?;
+
+    // `None` = "not mentioned", `Some("")` = "clear it".
+    let display_name = match input.display_name.as_deref() {
+        None => None,
+        Some(raw) => Some(Some(
+            validate::display_name(raw)
+                .map_err(AppError::BadRequest)?
+                .clone(),
+        )),
+    };
+    let bio = match input.bio.as_deref() {
+        None => None,
+        Some(raw) => Some(validate::bio(raw).map_err(AppError::BadRequest)?),
+    };
+    let avatar_url = match input.avatar_url.as_deref() {
+        None => None,
+        Some(raw) => Some(validate::avatar_url(raw).map_err(AppError::BadRequest)?),
+    };
+
+    // COALESCE keeps the ones that were not sent; empty strings are turned into
+    // NULL so "no display name" has a single representation.
+    sqlx::query(
+        "UPDATE users SET \
+         display_name = CASE WHEN ?2 IS NULL THEN display_name \
+                             WHEN ?2 = '' THEN NULL ELSE ?2 END, \
+         bio = CASE WHEN ?3 IS NULL THEN bio \
+                    WHEN ?3 = '' THEN NULL ELSE ?3 END, \
+         avatar_url = CASE WHEN ?4 IS NULL THEN avatar_url \
+                           WHEN ?4 = '' THEN NULL ELSE ?4 END, \
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+    )
+    .bind(claims.sub)
+    .bind(display_name.flatten().as_deref())
+    .bind(bio.as_deref())
+    .bind(avatar_url.as_deref())
+    .execute(&state.pool)
+    .await?;
+
+    Ok(Json(profile_of(&state, claims.sub).await?))
+}
+
+/// The caller's own profile row.
+pub async fn profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let claims = require_auth(&state, &headers).await?;
+    Ok(Json(profile_of(&state, claims.sub).await?))
+}
+
+async fn profile_of(state: &AppState, user_id: i64) -> Result<serde_json::Value, AppError> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: i64,
+        username: String,
+        email: String,
+        display_name: Option<String>,
+        bio: Option<String>,
+        avatar_url: Option<String>,
+        role: String,
+        banned: i64,
+        created_at: chrono::NaiveDateTime,
+    }
+
+    let row: Row = sqlx::query_as(
+        "SELECT id, username, email, display_name, bio, avatar_url, role, banned, created_at \
+         FROM users WHERE id = ?1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::Unauthorized)?;
+
+    Ok(serde_json::json!({
+        "id": row.id,
+        "username": row.username,
+        "display_name": row.display_name,
+        "email": row.email,
+        "bio": row.bio,
+        "avatar_url": row.avatar_url,
+        "role": Role::parse(&row.role).unwrap_or(Role::User).as_str(),
+        "banned": row.banned != 0,
+        "created_at": row.created_at,
+    }))
+}

@@ -20,7 +20,7 @@ const MAX_CONTENT_LEN: usize = 50_000;
 /// `forum_comments` are the only source of truth. Keeping a counter column in
 /// sync by hand is what let two concurrent toggles drift apart from the rows.
 const POST_SELECT: &str = "SELECT p.id, p.board, p.title, p.content, p.author_id, \
-     u.username AS author_username, p.is_featured, \
+     COALESCE(u.display_name, u.username) AS author_username, p.is_featured, \
      (SELECT COUNT(*) FROM forum_likes l \
       WHERE l.target_kind = 'post' AND l.target_id = p.id) AS likes_count, \
      (SELECT COUNT(*) FROM forum_comments rc \
@@ -30,7 +30,7 @@ const POST_SELECT: &str = "SELECT p.id, p.board, p.title, p.content, p.author_id
 
 /// Comment projection with its own derived like count.
 const COMMENT_SELECT: &str = "SELECT c.id, c.post_id, c.author_id, \
-     u.username AS author_username, c.content, \
+     COALESCE(u.display_name, u.username) AS author_username, c.content, \
      (SELECT COUNT(*) FROM forum_likes l \
       WHERE l.target_kind = 'comment' AND l.target_id = c.id) AS likes_count, \
      c.created_at \

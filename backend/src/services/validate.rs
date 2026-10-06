@@ -73,6 +73,67 @@ pub fn email(raw: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+pub const DISPLAY_NAME_MAX_CHARS: usize = 32;
+pub const BIO_MAX_CHARS: usize = 500;
+pub const AVATAR_URL_MAX_CHARS: usize = 500;
+
+/// Validate an optional display name.
+///
+/// Looser than [`username`] on purpose: spaces are fine here, and the value is
+/// only ever rendered as text next to content. Control characters are still
+/// refused, since they would let a name break the surrounding markup or layout.
+pub fn display_name(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if value.chars().count() > DISPLAY_NAME_MAX_CHARS {
+        return Err(format!(
+            "display name must be at most {DISPLAY_NAME_MAX_CHARS} characters"
+        ));
+    }
+    if value.chars().any(char::is_control) {
+        return Err("display name must not contain control characters".to_string());
+    }
+    Ok(value.to_string())
+}
+
+/// Validate an optional bio. Plain text, rendered as text.
+pub fn bio(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.chars().count() > BIO_MAX_CHARS {
+        return Err(format!("bio must be at most {BIO_MAX_CHARS} characters"));
+    }
+    if value
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err("bio must not contain control characters".to_string());
+    }
+    Ok(value.to_string())
+}
+
+/// Validate an optional avatar URL: absolute http(s) only, so an `<img src>`
+/// cannot be pointed at `javascript:` or a `data:` document.
+pub fn avatar_url(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if value.chars().count() > AVATAR_URL_MAX_CHARS {
+        return Err(format!(
+            "avatar url must be at most {AVATAR_URL_MAX_CHARS} characters"
+        ));
+    }
+    if value.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("avatar url must not contain whitespace".to_string());
+    }
+    if !(value.starts_with("https://") || value.starts_with("http://")) {
+        return Err("avatar url must start with http:// or https://".to_string());
+    }
+    Ok(value.to_string())
+}
+
 /// Validate a password. Only bounds are enforced here; strength beyond length is
 /// a product decision (`PASSWORD_MIN_CHARS` is deliberately low and documented).
 pub fn password(raw: &str) -> Result<(), String> {
@@ -144,6 +205,32 @@ mod tests {
         }
         let too_long = format!("{}@example.com", "a".repeat(EMAIL_MAX_CHARS));
         assert!(email(&too_long).is_err());
+    }
+
+    #[test]
+    fn profile_fields_are_optional_and_bounded() {
+        assert_eq!(display_name("   ").unwrap(), "");
+        assert_eq!(display_name("  张三  ").unwrap(), "张三");
+        assert!(display_name("带 空格 的名字").is_ok());
+        assert!(display_name(&"a".repeat(DISPLAY_NAME_MAX_CHARS + 1)).is_err());
+        assert!(display_name("bad\u{7}name").is_err());
+
+        assert_eq!(bio("").unwrap(), "");
+        assert!(bio("line one\nline two").is_ok());
+        assert!(bio(&"x".repeat(BIO_MAX_CHARS + 1)).is_err());
+
+        assert_eq!(avatar_url("").unwrap(), "");
+        assert_eq!(
+            avatar_url(" https://cdn.example/a.png ").unwrap(),
+            "https://cdn.example/a.png"
+        );
+        for bad in [
+            "javascript:alert(1)",
+            "data:image/svg+xml,<svg/>",
+            "/relative.png",
+        ] {
+            assert!(avatar_url(bad).is_err(), "{bad} should be rejected");
+        }
     }
 
     #[test]

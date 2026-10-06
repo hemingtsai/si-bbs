@@ -17,7 +17,7 @@ const MAX_CATEGORY_LEN: usize = 40;
 const MAX_CONTENT_LEN: usize = 200_000;
 
 const PAGE_SELECT: &str = "SELECT w.id, w.title, w.slug, w.category, w.content, w.status, \
-     w.author_id, w.created_at, w.updated_at, u.username AS author_username \
+     w.author_id, w.created_at, w.updated_at, COALESCE(u.display_name, u.username) AS author_username \
      FROM wiki_pages w LEFT JOIN users u ON u.id = w.author_id";
 
 fn is_staff(role: &str) -> bool {

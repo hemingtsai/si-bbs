@@ -376,3 +376,118 @@ async fn changing_the_email_requires_the_password_and_keeps_uniqueness() {
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 }
+
+/// Profile fields are what readers see instead of the login name, so they must be
+/// bounded, must not carry control characters, and must round-trip.
+#[tokio::test]
+async fn profile_fields_can_be_set_and_cleared() {
+    let app = common::test_server().await;
+    common::register(&app, "mallory").await;
+    let token = common::login(&app, "mallory").await;
+    let auth = format!("Bearer {token}");
+
+    // Nothing set yet.
+    let me = app
+        .get("/api/auth/profile")
+        .add_header("Authorization", auth.clone())
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(me["display_name"], serde_json::Value::Null);
+    assert_eq!(me["username"], "mallory");
+
+    let res = app
+        .patch("/api/auth/profile")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({
+            "display_name": "  马洛里  ",
+            "bio": "写点东西\n第二行",
+            "avatar_url": "https://cdn.example/avatar.png",
+        }))
+        .await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["display_name"], "马洛里");
+    assert_eq!(body["bio"], "写点东西\n第二行");
+    assert_eq!(body["avatar_url"], "https://cdn.example/avatar.png");
+
+    // Relative / script URLs are refused, and so are control characters.
+    app.patch("/api/auth/profile")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"avatar_url": "javascript:alert(1)"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    app.patch("/api/auth/profile")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"display_name": "bad\u{7}name"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    // An omitted field is untouched, an empty string clears it.
+    let body = app
+        .patch("/api/auth/profile")
+        .add_header("Authorization", auth.clone())
+        .json(&json!({"bio": ""}))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(body["bio"], serde_json::Value::Null);
+    assert_eq!(body["display_name"], "马洛里");
+
+    // Not logged in.
+    app.patch("/api/auth/profile")
+        .json(&json!({"display_name": "x"}))
+        .await
+        .assert_status_unauthorized();
+}
+
+/// Public content must show the display name when there is one.
+#[tokio::test]
+async fn display_names_replace_the_login_name_on_public_content() {
+    let (server, _pool) = common::test_ctx().await;
+    let alice = common::register_and_login(&server, "alice").await;
+    server
+        .patch("/api/auth/profile")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&json!({"display_name": "爱丽丝"}))
+        .await
+        .assert_status_ok();
+
+    let post = server
+        .post("/api/forum/posts")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&json!({"board": "life", "title": "标题", "content": "正文"}))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(post["author_username"], "爱丽丝");
+
+    let post_id = post["id"].as_i64().unwrap();
+    let list = server
+        .get("/api/forum/posts?board=life")
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(list["items"][0]["author_username"], "爱丽丝");
+
+    let comment = server
+        .post(&format!("/api/forum/posts/{post_id}/comments"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&json!({"content": "回复"}))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(comment["author_username"], "爱丽丝");
+
+    let wiki = server
+        .post("/api/wiki")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&json!({"title":"页面","category":"c","content":"x","status":"published"}))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(wiki["author_username"], "爱丽丝");
+
+    // The login name is still the identity used for logging in and for admin views.
+    common::login(&server, "alice").await;
+    let me = server
+        .get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(me["username"], "alice");
+}

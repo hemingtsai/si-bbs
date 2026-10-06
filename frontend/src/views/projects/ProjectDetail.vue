@@ -157,7 +157,7 @@ onMounted(load)
             <span class="row-sub">{{ comment.content }}</span>
           </div>
           <button
-            v-if="auth.username === comment.username || auth.isStaff"
+            v-if="auth.userId === comment.user_id || auth.isStaff"
             class="linklike"
             @click="removeComment(comment.id)"
           >
