@@ -65,10 +65,7 @@ export function applyRefreshResponse(data: RefreshResponse): string {
  */
 let refreshInFlight: Promise<string | null> | null = null
 
-async function refreshAccessToken(): Promise<string | null> {
-  const refresh = localStorage.getItem('refresh_token')
-  if (!refresh) return null
-
+export async function refreshAccessToken(refresh: string): Promise<string | null> {
   try {
     const { data } = await axios.post<RefreshResponse>(
       REFRESH_PATH,
@@ -77,8 +74,16 @@ async function refreshAccessToken(): Promise<string | null> {
     )
     return applyRefreshResponse(data)
   } catch {
-    // The refresh token expired or was revoked: drop the session.
-    clearSession()
+    // Drop the session only if this is still the session we tried to refresh.
+    //
+    // A password change invalidates every token, and the store installs the fresh
+    // pair the server returned. A request that was already in flight with the *old*
+    // token then fails, and its refresh fails too — without this check that stale
+    // failure would wipe the brand-new pair and log the user out of the session
+    // they just created.
+    if (localStorage.getItem('refresh_token') === refresh) {
+      clearSession()
+    }
     return null
   }
 }
@@ -105,12 +110,13 @@ api.interceptors.response.use(
     if (status !== 401 || !original || original._retried || isAuthPath(original.url)) {
       return Promise.reject(error)
     }
-    if (!localStorage.getItem('refresh_token')) {
+    const staleRefresh = localStorage.getItem('refresh_token')
+    if (!staleRefresh) {
       return Promise.reject(error)
     }
 
     original._retried = true
-    refreshInFlight = refreshInFlight ?? refreshAccessToken()
+    refreshInFlight = refreshInFlight ?? refreshAccessToken(staleRefresh)
     const token = await refreshInFlight
     refreshInFlight = null
 

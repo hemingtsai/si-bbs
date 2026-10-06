@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api, applyRefreshResponse, clearSession, isAuthPath } from '../../src/api/axios'
+import axios from 'axios'
+
+import {
+  api,
+  applyRefreshResponse,
+  clearSession,
+  isAuthPath,
+  refreshAccessToken,
+} from '../../src/api/axios'
 import { SESSION_CLEARED_EVENT } from '../../src/lib/session'
 
 describe('clearSession', () => {
@@ -84,5 +92,46 @@ describe('isAuthPath', () => {
 
     expect(seen).toBe('/auth/login')
     expect(isAuthPath(seen)).toBe(true)
+  })
+})
+
+describe('refreshAccessToken', () => {
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('does not wipe a session that replaced the one it failed to refresh', async () => {
+    // The user changed their password: the old pair is dead, the store installed the
+    // new one, and a request that was in flight with the old token now 401s.
+    localStorage.setItem('access_token', 'old-access')
+    localStorage.setItem('refresh_token', 'old-refresh')
+
+    const post = vi.spyOn(axios, 'post').mockImplementation(async () => {
+      // The store swaps in the fresh pair while the refresh is in flight.
+      localStorage.setItem('access_token', 'new-access')
+      localStorage.setItem('refresh_token', 'new-refresh')
+      throw new Error('401')
+    })
+
+    const token = await refreshAccessToken('old-refresh')
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(token).toBeNull()
+    // The stale failure must not log the user out of the new session.
+    expect(localStorage.getItem('access_token')).toBe('new-access')
+    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+  })
+
+  it('still drops the session when the token it refreshed is the current one', async () => {
+    localStorage.setItem('access_token', 'access')
+    localStorage.setItem('refresh_token', 'refresh')
+    vi.spyOn(axios, 'post').mockRejectedValue(new Error('401'))
+
+    const token = await refreshAccessToken('refresh')
+
+    expect(token).toBeNull()
+    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
   })
 })
