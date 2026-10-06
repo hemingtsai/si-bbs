@@ -67,7 +67,13 @@ impl RateLimiter {
         if bucket.count < self.max {
             return None;
         }
-        Some(bucket.reset_at.saturating_duration_since(now).as_secs().max(1))
+        Some(
+            bucket
+                .reset_at
+                .saturating_duration_since(now)
+                .as_secs()
+                .max(1),
+        )
     }
 
     /// Count one attempt against `key`, starting a fresh window when the previous

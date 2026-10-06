@@ -44,7 +44,9 @@ pub fn username(raw: &str) -> Result<String, String> {
 pub fn email(raw: &str) -> Result<String, String> {
     let value = raw.trim();
     if value.chars().count() > EMAIL_MAX_CHARS {
-        return Err(format!("email must be at most {EMAIL_MAX_CHARS} characters"));
+        return Err(format!(
+            "email must be at most {EMAIL_MAX_CHARS} characters"
+        ));
     }
     if value.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err("email must not contain whitespace".to_string());

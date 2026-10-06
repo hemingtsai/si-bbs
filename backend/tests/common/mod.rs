@@ -35,7 +35,10 @@ pub async fn test_ctx_with_github(github_api_base: &str) -> (TestServer, SqliteP
 /// (wiremock keeps the first mounted mock, so a second mock server is the way
 /// to change GitHub's answer mid-test).
 pub fn server_with(pool: SqlitePool, github_api_base: &str) -> TestServer {
-    TestServer::new(create_router(AppState::new(pool, test_config(github_api_base))))
+    TestServer::new(create_router(AppState::new(
+        pool,
+        test_config(github_api_base),
+    )))
 }
 
 /// Router that serves a static directory as well as the API, so the SPA

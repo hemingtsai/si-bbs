@@ -461,9 +461,15 @@ async fn concurrent_like_toggles_never_report_a_count_the_table_disagrees_with()
     // drift: all three can observe "no like row" and then each add its own +1.
     for round in 0..16 {
         let (first, second, third) = tokio::join!(
-            server.post(&like_url).add_header("Authorization", auth.clone()),
-            server.post(&like_url).add_header("Authorization", auth.clone()),
-            server.post(&like_url).add_header("Authorization", auth.clone())
+            server
+                .post(&like_url)
+                .add_header("Authorization", auth.clone()),
+            server
+                .post(&like_url)
+                .add_header("Authorization", auth.clone()),
+            server
+                .post(&like_url)
+                .add_header("Authorization", auth.clone())
         );
         first.assert_status_ok();
         second.assert_status_ok();
@@ -477,10 +483,7 @@ async fn concurrent_like_toggles_never_report_a_count_the_table_disagrees_with()
             .fetch_one(&pool)
             .await
             .unwrap();
-        let listed = server
-            .get(&detail_url)
-            .await
-            .json::<serde_json::Value>()["likes_count"]
+        let listed = server.get(&detail_url).await.json::<serde_json::Value>()["likes_count"]
             .as_i64()
             .unwrap();
         assert_eq!(
@@ -507,10 +510,7 @@ async fn concurrent_like_toggles_never_report_a_count_the_table_disagrees_with()
         .fetch_one(&pool)
         .await
         .unwrap();
-    let listed = server
-        .get(&detail_url)
-        .await
-        .json::<serde_json::Value>()["likes_count"]
+    let listed = server.get(&detail_url).await.json::<serde_json::Value>()["likes_count"]
         .as_i64()
         .unwrap();
     assert_eq!((toggled, rows, listed), (flipped, flipped, flipped));

@@ -186,10 +186,7 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         // their `.br`/`.gz` siblings, and the layer leaves anything that carries a
         // `Content-Encoding` alone, so nothing is compressed twice. The size
         // predicate keeps small JSON lists from paying for a gzip round trip.
-        .layer(
-            CompressionLayer::new()
-                .compress_when(SizeAbove::new(COMPRESSION_MIN_BYTES)),
-        )
+        .layer(CompressionLayer::new().compress_when(SizeAbove::new(COMPRESSION_MIN_BYTES)))
         .layer(axum::middleware::from_fn(
             crate::middleware::security::security_headers,
         ))

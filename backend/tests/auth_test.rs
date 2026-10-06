@@ -95,7 +95,9 @@ async fn register_rejects_names_differing_only_by_case() {
 
     // Same email, different case.
     app.post("/api/auth/register")
-        .json(&json!({"username": "someone", "email": "alice@example.com", "password": "secret123"}))
+        .json(
+            &json!({"username": "someone", "email": "alice@example.com", "password": "secret123"}),
+        )
         .await
         .assert_status_conflict();
 

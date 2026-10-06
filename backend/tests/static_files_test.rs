@@ -10,8 +10,11 @@ use axum::http::StatusCode;
 /// Build a throwaway `dist/` with an index and one hashed asset.
 fn static_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
-    fs::write(dir.path().join("index.html"), "<!doctype html><title>SI BBS</title>")
-        .expect("write index.html");
+    fs::write(
+        dir.path().join("index.html"),
+        "<!doctype html><title>SI BBS</title>",
+    )
+    .expect("write index.html");
     fs::create_dir_all(dir.path().join("assets")).expect("mkdir assets");
     fs::write(dir.path().join("assets/app-abc123.js"), "console.log(1)").expect("write asset");
     dir
@@ -35,7 +38,9 @@ async fn hashed_assets_are_immutable_and_carry_the_security_headers() {
         Some("public, max-age=31536000, immutable")
     );
     assert_eq!(
-        headers.get("x-content-type-options").and_then(|v| v.to_str().ok()),
+        headers
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
         Some("nosniff")
     );
     assert!(headers.get("content-security-policy").is_some());
@@ -53,7 +58,9 @@ async fn client_side_routes_fall_back_to_the_shell_without_long_caching() {
     res.assert_status_ok();
     assert!(res.text().contains("SI BBS"));
     assert_eq!(
-        res.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+        res.headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok()),
         Some("no-cache")
     );
 }
@@ -76,7 +83,10 @@ async fn without_a_static_directory_the_api_still_works() {
 
     server.get("/api/health").await.assert_status_ok();
     // No fallback is registered, so this is a bare 404 rather than the shell.
-    server.get("/forum/42").await.assert_status(StatusCode::NOT_FOUND);
+    server
+        .get("/forum/42")
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
 }
 
 /// The build copies `.br`/`.gz` siblings next to every compressible artifact;
@@ -99,7 +109,9 @@ async fn precompressed_siblings_are_served_when_the_client_asks_for_them() {
         .await;
     res.assert_status_ok();
     assert_eq!(
-        res.headers().get("content-encoding").and_then(|v| v.to_str().ok()),
+        res.headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok()),
         Some("br")
     );
     // A cache must keep the two encodings apart.
@@ -117,8 +129,11 @@ async fn precompressed_siblings_are_served_when_the_client_asks_for_them() {
 #[tokio::test]
 async fn a_client_without_brotli_support_gets_the_original_file() {
     let dir = static_dir();
-    fs::write(dir.path().join("assets/app-abc123.js.br"), "brotli-encoded-body")
-        .expect("write brotli sibling");
+    fs::write(
+        dir.path().join("assets/app-abc123.js.br"),
+        "brotli-encoded-body",
+    )
+    .expect("write brotli sibling");
 
     let pool = common::test_pool().await;
     let server = common::server_with_static(pool, Some(dir.path().to_string_lossy().into_owned()));

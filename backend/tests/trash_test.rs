@@ -637,12 +637,11 @@ async fn purging_a_forum_post_removes_replies_and_likes() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    let replies: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM forum_comments WHERE post_id = ?1")
-            .bind(post_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let replies: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_comments WHERE post_id = ?1")
+        .bind(post_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let likes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
         .fetch_one(&pool)
         .await

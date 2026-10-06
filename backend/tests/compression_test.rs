@@ -37,7 +37,9 @@ async fn large_api_responses_are_compressed_and_advertise_it() {
         .await;
     res.assert_status_ok();
     assert_eq!(
-        res.headers().get("content-encoding").and_then(|v| v.to_str().ok()),
+        res.headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok()),
         Some("gzip")
     );
     // Caches must key on the encoding, or a compressed body could be handed to a

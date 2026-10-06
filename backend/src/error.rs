@@ -11,7 +11,9 @@ pub enum AppError {
     Unauthorized,
     Forbidden,
     /// Carries the wait so the response can advertise `Retry-After`.
-    TooManyRequests { retry_after_secs: u64 },
+    TooManyRequests {
+        retry_after_secs: u64,
+    },
     Internal(String),
 }
 
@@ -64,9 +66,7 @@ impl IntoResponse for AppError {
             Self::NotFound => json!({ "error": "not found" }),
             Self::Unauthorized => json!({ "error": "unauthorized" }),
             Self::Forbidden => json!({ "error": "forbidden" }),
-            Self::TooManyRequests {
-                retry_after_secs,
-            } => json!({
+            Self::TooManyRequests { retry_after_secs } => json!({
                 "error": format!("too many requests, retry in {retry_after_secs} seconds")
             }),
         };
