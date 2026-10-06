@@ -18,12 +18,18 @@ fn readme_body(markdown: &str) -> String {
 }
 
 fn repo_body() -> String {
+    repo_body_with(47000, 3900)
+}
+
+/// Same shape as [`repo_body`] but with controllable counters, for the refresh
+/// tests that need GitHub to report different numbers the second time.
+fn repo_body_with(stars: i64, forks: i64) -> String {
     serde_json::json!({
         "name": "ripgrep",
         "owner": { "login": "BurntSushi" },
         "description": "ripgrep recursively searches directories for a regex pattern",
-        "stargazers_count": 47000,
-        "forks_count": 3900,
+        "stargazers_count": stars,
+        "forks_count": forks,
         "language": "Rust",
         "topics": ["search", "cli", "grep"],
         "license": { "spdx_id": "MIT", "name": "MIT License" },
@@ -715,8 +721,15 @@ async fn detail_clears_readme_when_repo_has_none() {
         .await
         .unwrap();
 
-    // Repo without a README: the missing copy is recorded and stays null.
+    // Repo without a README: the missing copy is recorded and stays null. The
+    // metadata endpoint has to answer too — the refresh asks for it first, and a
+    // 404 there means "repository is gone", which keeps the cached document.
     let gh2 = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/BurntSushi/ripgrep"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(repo_body()))
+        .mount(&gh2)
+        .await;
     Mock::given(method("GET"))
         .and(path("/repos/BurntSushi/ripgrep/readme"))
         .respond_with(ResponseTemplate::new(404))
@@ -812,4 +825,114 @@ async fn github_token_is_sent_when_configured() {
     submit(&server, &alice, "https://github.com/o/r", "misc")
         .await
         .assert_status(axum::http::StatusCode::CREATED);
+}
+
+/// The counters were captured once at submission and never revisited, so a
+/// catalogue sorted by stars slowly drifted away from reality.
+#[tokio::test]
+async fn stale_refresh_updates_the_github_counters() {
+    let gh = mock_github("# cached readme").await;
+    let (server, pool) = test_ctx_with_github(&gh.uri()).await;
+    let alice = register_and_login(&server, "alice").await;
+
+    let res = submit(
+        &server,
+        &alice,
+        "https://github.com/BurntSushi/ripgrep",
+        "dev-tools",
+    )
+    .await;
+    let body = res.json::<serde_json::Value>();
+    let id = body["id"].as_i64().unwrap();
+    assert_eq!(body["stars"], 47000);
+
+    sqlx::query(
+        "UPDATE projects SET status = 'approved', readme_fetched_at = datetime('now', '-48 hours'), \
+         readme_attempted_at = NULL WHERE id = ?1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // GitHub now reports more stars and a new README.
+    let gh2 = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/BurntSushi/ripgrep"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(repo_body_with(48000, 4100)))
+        .mount(&gh2)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/BurntSushi/ripgrep/readme"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(readme_body("# refreshed")))
+        .mount(&gh2)
+        .await;
+    let server2 = common::server_with(pool.clone(), &gh2.uri());
+
+    let res = server2.get(&format!("/api/projects/{id}")).await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["stars"], 48000);
+    assert_eq!(body["forks"], 4100);
+    assert_eq!(body["readme_raw"], "# refreshed");
+}
+
+/// A README that cannot be fetched must not also freeze the counters: they come
+/// from a separate call, and the cached document is simply kept.
+#[tokio::test]
+async fn a_readme_failure_still_refreshes_the_counters() {
+    let gh = mock_github("# cached readme").await;
+    let (server, pool) = test_ctx_with_github(&gh.uri()).await;
+    let alice = register_and_login(&server, "alice").await;
+
+    let res = submit(
+        &server,
+        &alice,
+        "https://github.com/BurntSushi/ripgrep",
+        "dev-tools",
+    )
+    .await;
+    let id = res.json::<serde_json::Value>()["id"].as_i64().unwrap();
+    sqlx::query(
+        "UPDATE projects SET status = 'approved', readme_fetched_at = datetime('now', '-48 hours'), \
+         readme_attempted_at = NULL WHERE id = ?1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let fetched_before: Option<String> =
+        sqlx::query_scalar("SELECT readme_fetched_at FROM projects WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let gh2 = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/BurntSushi/ripgrep"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(repo_body_with(49000, 4200)))
+        .mount(&gh2)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/BurntSushi/ripgrep/readme"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&gh2)
+        .await;
+    let server2 = common::server_with(pool.clone(), &gh2.uri());
+
+    let res = server2.get(&format!("/api/projects/{id}")).await;
+    res.assert_status_ok();
+    let body = res.json::<serde_json::Value>();
+    assert_eq!(body["stars"], 49000, "counters should still refresh");
+    assert_eq!(body["readme_raw"], "# cached readme", "cache must be kept");
+
+    // The document is no older than it was: a failed fetch is not a refresh.
+    let fetched_after: Option<String> =
+        sqlx::query_scalar("SELECT readme_fetched_at FROM projects WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(fetched_before, fetched_after);
 }

@@ -59,9 +59,11 @@ README 和 wiki 页面直接存 Markdown 源文，后端永不生成 HTML。前�
 渲染，`highlight.js/lib/common` 做代码高亮，再用 DOMPurify 消毒后插入 DOM。
 这样后端不暴露任何 XSS 面，也避免了存储两份内容（原文和 HTML）不一致。
 
-**2. README 懒刷新，不定时同步。**
+**2. 项目数据懒刷新，不定时同步。**
 历史版本曾对所有已收项目定时刷 GitHub，在小机器上是纯浪费。现在只在
-`GET /api/projects/{id}` 时检查 `readme_fetched_at`，超过 24 小时才重新抓取。
+`GET /api/projects/{id}` 时检查 `readme_fetched_at`，超过 24 小时才重新抓取；
+抓的是两样东西：先 `GET /repos/{owner}/{repo}` 把 `stars`/`forks`/`language`/
+`topics`/`license` 写回（否则按星排序会长期失真），再取 README。
 两个时间戳分工不同：`readme_fetched_at` 只由**成功**的抓取推进（它回答"这份
 文档有多旧"），`readme_attempted_at` 记录**每一次尝试**，失败后 10 分钟内不再
 重试同一个项目——否则 GitHub 宕机期间每个详情请求都要等一次上游超时。

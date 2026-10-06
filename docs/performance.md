@@ -56,8 +56,8 @@ ab -n 1000 -c 64 http://localhost:3001/api/health
 | 场景 | 表现 | 对策 |
 | --- | --- | --- |
 | 写操作被读挡住 | SQLite 写锁串行，大并发写会排队 | BBS 写操作极少；继续加就上 PostgreSQL，改 `sqlx::PgPool` |
-| README 刷新抖动 | 同一项目 24h 内只成功刷新一次；失败后 10 分钟内不再重试 | `readme_fetched_at`（成功时间）与 `readme_attempted_at`（尝试时间）分开，失败也会记录尝试 |
-| 项目元数据陈旧 | `stars`/`forks`/`topics` 只在提交时抓取，之后不再更新，"按星排序"会逐渐失真 | 尚未实现；需与 README 刷新共用一次 `GET /repos/{owner}/{repo}` |
+| 刷新抖动 | 同一项目 24h 内只成功刷新一次；失败后 10 分钟内不再重试 | `readme_fetched_at`（成功时间）与 `readme_attempted_at`（尝试时间）分开，失败也会记录尝试。一次刷新最多打两次 GitHub（元数据 + README），都在失败退避的管辖内 |
+| 项目元数据陈旧 | `stars`/`forks`/`topics` 曾只在提交时抓取，之后不再更新，"按星排序"会逐渐失真 | 已随 24h 懒刷新一起更新：刷新时先取一次 `GET /repos/{owner}/{repo}` 写回计数，再单独取 README；README 失败不影响计数更新 |
 | GitHub API 限速 | 匿名 60 次/小时/IP | 配置 `GITHUB_TOKEN` 提到 5000 次/小时 |
 | 首屏 JS 体积 | marked+highlight 很重 | 已用 `highlight.js/lib/common` 而非全量（省约 1MB），按路由懒加载详情页 |
 | 并发压垮内存 | 瞬时大流量 | `ConcurrencyLimitLayer(64)` 限并发——注意它是**排队背压**，不是快速失败/503；要拒绝得另加 `LoadShedLayer` |

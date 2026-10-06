@@ -155,9 +155,25 @@ impl GithubClient {
         }
     }
 
-    /// Fetch repository metadata. A 404 from GitHub is surfaced as 400 so the
-    /// submitter learns the repository does not exist.
+    /// Fetch repository metadata **and** the README. A 404 from GitHub is surfaced
+    /// as 400 so the submitter learns the repository does not exist.
+    ///
+    /// A README fetch that fails for any other reason is swallowed into `None`:
+    /// at submission time the metadata is what matters, and the document will be
+    /// picked up by the periodic refresh. Callers that must tell "no README" apart
+    /// from "README fetch failed" should use [`Self::fetch_metadata`] plus
+    /// [`Self::fetch_readme`].
     pub async fn fetch_repo(&self, r: &RepoRef) -> Result<RepoMeta, AppError> {
+        let mut meta = self.fetch_metadata(r).await?;
+        meta.readme = self.fetch_readme(r).await.unwrap_or(None);
+        Ok(meta)
+    }
+
+    /// Fetch repository metadata only (`readme` is `None`).
+    ///
+    /// The periodic refresh uses this instead of [`Self::fetch_repo`] so that a
+    /// failed README call cannot also block the volatile counters from updating.
+    pub async fn fetch_metadata(&self, r: &RepoRef) -> Result<RepoMeta, AppError> {
         let url = format!("{}/repos/{}/{}", self.base, r.owner, r.repo);
         let resp = self
             .request(url)
@@ -194,7 +210,7 @@ impl GithubClient {
             forks: gh.forks_count,
             license,
             topics: gh.topics.unwrap_or_default(),
-            readme: self.fetch_readme(r).await.unwrap_or(None),
+            readme: None,
         })
     }
 

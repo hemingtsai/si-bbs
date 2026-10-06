@@ -194,7 +194,7 @@ pub async fn detail(
         return Err(AppError::NotFound);
     }
 
-    if refresh_readme_if_stale(&state, &mut project).await {
+    if refresh_project_if_stale(&state, &mut project).await {
         project = fetch_project(&state, id).await?;
     }
 
@@ -364,14 +364,19 @@ pub async fn fetch_public_project(state: &AppState, id: i64) -> Result<Project, 
     Ok(project)
 }
 
-/// Refresh `readme_raw` when the cached copy is older than [`README_TTL_HOURS`].
-/// Returns whether the stored copy changed.
+/// Refresh the cached GitHub data — the README **and** the volatile counters
+/// (stars, forks, language, topics, license) — when it is older than
+/// [`README_TTL_HOURS`]. Returns whether anything changed.
 ///
 /// Two independent timestamps decide the work: `readme_fetched_at` says how old
-/// the document is (only advanced by a successful fetch), while
+/// the cached data is (only advanced by a successful fetch), while
 /// `readme_attempted_at` throttles retries after a failure. GitHub errors are
 /// logged and the stale copy is kept.
-async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> bool {
+///
+/// The metadata and the README are fetched separately on purpose: if only the
+/// README call fails, the counters still get updated rather than the whole
+/// refresh being abandoned.
+async fn refresh_project_if_stale(state: &AppState, project: &mut Project) -> bool {
     let now = Utc::now().naive_utc();
     let stale = match project.readme_fetched_at {
         None => true,
@@ -400,6 +405,54 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
         }
     };
 
+    // Metadata first. If GitHub is unreachable this is where we find out, and the
+    // counters keep their previous values.
+    let mut changed = false;
+    match client.fetch_metadata(&repo_ref).await {
+        Ok(meta) => {
+            let topics = meta.topics.join(",");
+            if let Err(e) = sqlx::query(
+                "UPDATE projects SET stars = ?2, forks = ?3, language = ?4, topics = ?5, \
+                 license = ?6 WHERE id = ?1",
+            )
+            .bind(project.id)
+            .bind(meta.stars)
+            .bind(meta.forks)
+            .bind(meta.language.as_deref())
+            .bind(&topics)
+            .bind(meta.license.as_deref())
+            .execute(&state.pool)
+            .await
+            {
+                tracing::warn!(project_id = project.id, error = %e, "metadata refresh write failed");
+                return false;
+            }
+            changed |= (
+                project.stars,
+                project.forks,
+                project.language.clone(),
+                project.topics.clone(),
+                project.license.clone(),
+            ) != (
+                meta.stars,
+                meta.forks,
+                meta.language.clone(),
+                Some(topics),
+                meta.license.clone(),
+            );
+            project.stars = meta.stars;
+            project.forks = meta.forks;
+            project.language = meta.language;
+            project.topics = Some(meta.topics.join(","));
+            project.license = meta.license;
+        }
+        Err(e) => {
+            tracing::warn!(project_id = project.id, error = %e, "metadata refresh failed, keeping cache");
+            record_refresh_attempt(state, project).await;
+            return false;
+        }
+    }
+
     match client.fetch_readme(&repo_ref).await {
         Ok(Some(readme)) => {
             let res = sqlx::query(
@@ -412,7 +465,7 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
             .await;
             if let Err(e) = res {
                 tracing::warn!(project_id = project.id, error = %e, "readme refresh write failed");
-                return false;
+                return changed;
             }
             project.readme_raw = Some(readme);
             project.readme_fetched_at = Some(Utc::now().naive_utc());
@@ -431,7 +484,7 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
             .await
             {
                 tracing::warn!(project_id = project.id, error = %e, "readme clear failed");
-                return false;
+                return changed;
             }
             project.readme_raw = None;
             project.readme_fetched_at = Some(Utc::now().naive_utc());
@@ -440,20 +493,26 @@ async fn refresh_readme_if_stale(state: &AppState, project: &mut Project) -> boo
         }
         Err(e) => {
             tracing::warn!(project_id = project.id, error = %e, "readme refresh failed, keeping cache");
-            // Record the attempt even though nothing was refreshed, so the next
-            // request within the retry window skips the upstream call.
-            if let Err(e) = sqlx::query(
-                "UPDATE projects SET readme_attempted_at = CURRENT_TIMESTAMP WHERE id = ?1",
-            )
-            .bind(project.id)
-            .execute(&state.pool)
-            .await
-            {
-                tracing::warn!(project_id = project.id, error = %e, "readme attempt write failed");
-            } else {
-                project.readme_attempted_at = Some(Utc::now().naive_utc());
-            }
-            false
+            // The counters above are already refreshed; only the document keeps its
+            // cached copy. Record the attempt so the next request inside the retry
+            // window skips the upstream call.
+            record_refresh_attempt(state, project).await;
+            changed
+        }
+    }
+}
+
+/// Stamp the last attempt without touching the success timestamp, so a failure
+/// backs off without pretending the cached data was refreshed.
+async fn record_refresh_attempt(state: &AppState, project: &mut Project) {
+    match sqlx::query("UPDATE projects SET readme_attempted_at = CURRENT_TIMESTAMP WHERE id = ?1")
+        .bind(project.id)
+        .execute(&state.pool)
+        .await
+    {
+        Ok(_) => project.readme_attempted_at = Some(Utc::now().naive_utc()),
+        Err(e) => {
+            tracing::warn!(project_id = project.id, error = %e, "refresh attempt write failed")
         }
     }
 }
