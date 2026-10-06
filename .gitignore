@@ -5,8 +5,12 @@ test-results
 playwright-report
 blob-report
 coverage
-# E2E scratch database (wiped and recreated by playwright.config.ts on every run)
+# E2E scratch state (wiped and recreated by playwright.config.ts on every run)
 /.playwright/
+# Attachment store in local development (`UPLOAD_DIR` defaults to ./uploads). The
+# container points it at /data/uploads, and the E2E run at .playwright/uploads, so
+# nothing here is ever a source file.
+/uploads/
 *.db
 *.db-shm
 *.db-wal

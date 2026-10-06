@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+import { resolve } from 'node:path'
+
 import { E2E_DB_URL } from './e2e/support/db'
 
 const HOST = '127.0.0.1'
@@ -18,9 +20,13 @@ const PREVIEW_BUILD = 'npm --prefix frontend run build:only'
 const PREVIEW_ARGS = `--port ${PORT} --strictPort --host ${HOST}`
 const PREVIEW_SERVE = `npm --prefix frontend run preview -- ${PREVIEW_ARGS}`
 const PREVIEW = `${PREVIEW_BUILD} && ${PREVIEW_SERVE}`
+const E2E_UPLOAD_DIR = resolve(REPO_ROOT, '.playwright/uploads')
 const BACKEND_ENV = {
   DATABASE_URL: E2E_DB_URL,
   JWT_SECRET: 'e2e-test-secret',
+  // Keep test uploads inside the scratch directory: the default (`./uploads`) put
+  // them in the repository root, where they showed up as untracked files.
+  UPLOAD_DIR: E2E_UPLOAD_DIR,
 }
 const CI = !!process.env.CI
 const WEB_SERVER = {
