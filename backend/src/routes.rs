@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::config::Config;
 use crate::handlers::{admin, auth, comment, forum, project, rating, trash, wiki};
@@ -50,7 +54,7 @@ pub fn create_router(state: AppState) -> Router {
 /// process environment, which is unsafe and racy across parallel tests.
 pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router {
     let mut router = Router::new()
-        .route("/api/health", get(|| async { "ok" }))
+        .route("/api/health", get(health))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/refresh", post(auth::refresh))
@@ -163,5 +167,39 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .layer(axum::middleware::from_fn(
             crate::middleware::security::security_headers,
         ))
+        // Outermost of the three: the recorded latency should include the wait for
+        // a concurrency slot, and static responses must show up in the log too.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::extract::Request| {
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        path = %request.uri().path(),
+                    )
+                })
+                // `DefaultOnResponse` logs at DEBUG, which the documented
+                // `RUST_LOG=…=info` filter drops — a default deployment produced no
+                // access log at all. Pin the completed-request event to INFO.
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state)
+}
+
+/// Liveness/readiness probe.
+///
+/// It touches the database on purpose: a process that is listening but cannot
+/// reach SQLite answers 200 otherwise, and the orchestrator keeps sending it
+/// traffic.
+async fn health(State(state): State<AppState>) -> axum::response::Response {
+    match sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, "ok").into_response(),
+        Err(err) => {
+            tracing::error!(error = %err, "health check failed");
+            (StatusCode::SERVICE_UNAVAILABLE, "database unavailable").into_response()
+        }
+    }
 }

@@ -60,6 +60,21 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 > 注意：`main.rs` 目前把监听地址写死为 `0.0.0.0:3000`。如果需要用 `PORT`，
 > 把 `Config` 里读 `PORT` 再传给 `TcpListener::bind` 即可（一处改动）。
 
+### 探针、日志与停机
+
+- **`GET /api/health` 会执行 `SELECT 1`**：只监听但连不上 SQLite 时返回 503
+  `database unavailable`（而不是 200），否则编排层会持续把流量送进来。
+  镜像里已声明 `HEALTHCHECK`（busybox `wget`，非 2xx 即失败），30s 间隔。
+- **访问日志**：`TraceLayer` 把"请求完成"事件钉在 INFO，因此默认的
+  `RUST_LOG=si_bbs_backend=info,tower_http=info` 就能看到
+  `method=… path=… latency=… status=…`。tower-http 的默认级别是 DEBUG，
+  默认过滤下等于没有访问日志。
+- **优雅停机**：收到 SIGTERM/`Ctrl-C` 后先停止接收新连接、等在途请求结束，
+  再执行 `PRAGMA wal_checkpoint(TRUNCATE)` 折叠 WAL，最后退出。
+  `docker stop` / `rc-service si-bbs stop` 都会走到这条路径。
+- **5xx 的定位**：响应体只有通用文案，真实原因（含 SQLite 驱动报错）写进
+  服务端 ERROR 日志，例如 `tracing::error!(error = …)`。
+
 ## 用 Caddy 反向代理 + TLS（推荐，已用于生产）
 
 服务器上的生产环境用 Caddy 2（`apk add caddy caddy-openrc`）：TLS 终止与证书自动

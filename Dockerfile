@@ -36,4 +36,9 @@ RUN mkdir -p /data && chown -R sibbs:sibbs /data /app
 USER sibbs
 EXPOSE 3000
 VOLUME ["/data"]
+# The probe queries SQLite as well, so a container that is listening but cannot
+# reach its database is reported unhealthy instead of "up". busybox wget exits
+# non-zero on any non-2xx answer.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 CMD ["/app/si-bbs-backend"]
