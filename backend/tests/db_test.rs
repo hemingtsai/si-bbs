@@ -14,6 +14,7 @@ async fn migrations_apply_cleanly() {
         vec![
             "audit_log",
             "comments",
+            "content_reports",
             "forum_comments",
             "forum_likes",
             "forum_posts",

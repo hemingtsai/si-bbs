@@ -4,5 +4,6 @@ pub mod forum;
 pub mod page;
 pub mod project;
 pub mod rating;
+pub mod report;
 pub mod user;
 pub mod wiki;

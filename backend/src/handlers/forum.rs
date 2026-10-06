@@ -11,7 +11,7 @@ use crate::models::forum::{
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
-use crate::services::audit;
+use crate::services::{audit, reports};
 
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CONTENT_LEN: usize = 50_000;
@@ -224,6 +224,7 @@ pub async fn delete_post(
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+    reports::resolve_for_target(&state.pool, "forum_post", id, claims.sub, "content removed").await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -360,6 +361,14 @@ pub async fn delete_comment(
     .bind(claims.sub)
     .execute(&state.pool)
     .await?;
+    reports::resolve_for_target(
+        &state.pool,
+        "forum_comment",
+        id,
+        claims.sub,
+        "content removed",
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

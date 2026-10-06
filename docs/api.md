@@ -128,6 +128,23 @@
 | PATCH | `/api/admin/users/{id}/ban` | `{banned: true|false}`，不可封禁自己或唯一的 admin |
 | GET | `/api/admin/stats` | `{users, users_banned, projects, projects_pending, projects_approved, wiki_published, comments, ratings, trashed}` |
 
+## 举报
+
+任何登录用户都可以举报**公开且未删除**的内容（软删的帖子、草稿 wiki、待审项目
+都会被 404 掉，举报它们只会制造无用工单）。同一用户对同一目标只有一条记录，
+重复举报返回 200 `already reported`。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/reports` | 登录 | `{target_kind, target_id, reason}`；`target_kind` ∈ `forum_post`/`forum_comment`/`wiki`/`project`/`comment`，`reason` ≤500 字；每小时 20 条上限，超限 429 |
+| GET | `/api/reports?status=&kind=&page=&per_page=` | mod+ | 队列，默认只列 `status=open`（`all` 可查全部），按时间正序（先到先处理）。返回 `target_title`（帖子标题 / 评论摘要）与 `target_deleted`，无需二次请求 |
+| PATCH | `/api/reports/{id}` | mod+ | `{status: "resolved"\|"dismissed", note?}`；已处理的再改返回 409，非法值 400；动作写入审计日志 |
+| GET | `/api/reports/mine` | 登录 | 我提交过的举报及处理结果 |
+
+**闭环**：如果版主直接删除了被举报的内容，该目标的未处理举报会被自动置为
+`resolved` 并附 `note="content removed"`，不会留在队列里。删除路径覆盖
+论坛帖子/回复、wiki 页面、项目、项目评论。
+
 ## 订阅（RSS）
 
 公开、无需认证——feed 阅读器不会带 `Authorization`。每个源最多 30 条，

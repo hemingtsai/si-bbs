@@ -10,6 +10,7 @@ use crate::models::comment::{CommentInput, CommentOut};
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
+use crate::services::reports;
 
 const MIN_CONTENT_LEN: usize = 1;
 const MAX_CONTENT_LEN: usize = 5000;
@@ -129,6 +130,14 @@ pub async fn delete(
     .execute(&state.pool)
     .await?;
 
+    reports::resolve_for_target(
+        &state.pool,
+        "comment",
+        comment_id,
+        claims.sub,
+        "content removed",
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

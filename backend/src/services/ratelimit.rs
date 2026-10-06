@@ -23,6 +23,11 @@ pub const LOGIN_WINDOW: Duration = Duration::from_secs(300);
 pub const REGISTER_MAX_ATTEMPTS: u32 = 60;
 pub const REGISTER_WINDOW: Duration = Duration::from_secs(3600);
 
+/// Reports one account may file inside [`REPORT_WINDOW`]. Generous for a real
+/// reader, far too small to fill the moderation queue.
+pub const REPORT_MAX_ATTEMPTS: u32 = 20;
+pub const REPORT_WINDOW: Duration = Duration::from_secs(3600);
+
 /// Above this many tracked keys, expired buckets are swept on write so an
 /// attacker cycling unique usernames cannot grow the map without bound.
 const SWEEP_THRESHOLD: usize = 4096;

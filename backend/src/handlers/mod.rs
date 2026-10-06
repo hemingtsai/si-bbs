@@ -5,5 +5,6 @@ pub mod feed;
 pub mod forum;
 pub mod project;
 pub mod rating;
+pub mod report;
 pub mod trash;
 pub mod wiki;

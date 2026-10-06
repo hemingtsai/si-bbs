@@ -17,7 +17,7 @@ use tracing::Level;
 const COMPRESSION_MIN_BYTES: u16 = 1024;
 
 use crate::config::Config;
-use crate::handlers::{admin, auth, comment, feed, forum, project, rating, trash, wiki};
+use crate::handlers::{admin, auth, comment, feed, forum, project, rating, report, trash, wiki};
 use crate::services::ratelimit::{self, RateLimiter};
 
 #[derive(Clone)]
@@ -29,6 +29,8 @@ pub struct AppState {
     pub login_limiter: Arc<RateLimiter>,
     /// Sign-up budget for the whole process.
     pub register_limiter: Arc<RateLimiter>,
+    /// Reports one account may file per hour.
+    pub report_limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -43,6 +45,10 @@ impl AppState {
             register_limiter: Arc::new(RateLimiter::new(
                 ratelimit::REGISTER_MAX_ATTEMPTS,
                 ratelimit::REGISTER_WINDOW,
+            )),
+            report_limiter: Arc::new(RateLimiter::new(
+                ratelimit::REPORT_MAX_ATTEMPTS,
+                ratelimit::REPORT_WINDOW,
             )),
         }
     }
@@ -127,6 +133,10 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
             "/api/forum/rules/{board}",
             axum::routing::put(forum::upsert_rule),
         )
+        // Reports.
+        .route("/api/reports", get(report::list).post(report::create))
+        .route("/api/reports/mine", get(report::mine))
+        .route("/api/reports/{id}", axum::routing::patch(report::resolve))
         // Feeds (public, unauthenticated by design: a reader sends no auth header).
         .route("/feed.xml", get(feed::site))
         .route("/forum/feed.xml", get(feed::forum))

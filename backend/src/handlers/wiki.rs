@@ -10,6 +10,7 @@ use crate::models::wiki::{
     WikiInput, WikiListQuery, WikiPageJoined, WikiPageOut, WikiStatus, slugify,
 };
 use crate::routes::AppState;
+use crate::services::reports;
 
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CATEGORY_LEN: usize = 40;
@@ -288,6 +289,7 @@ pub async fn delete(
     .execute(&state.pool)
     .await?;
 
+    reports::resolve_for_target(&state.pool, "wiki", id, claims.sub, "content removed").await;
     Ok(StatusCode::NO_CONTENT)
 }
 

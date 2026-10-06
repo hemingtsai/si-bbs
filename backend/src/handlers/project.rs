@@ -10,8 +10,8 @@ use crate::models::page::Page;
 use crate::models::project::{Project, ProjectOut, ProjectStatus};
 use crate::models::user::Role;
 use crate::routes::AppState;
-use crate::services::audit;
 use crate::services::github::{self, GithubClient};
+use crate::services::{audit, reports};
 
 /// A README older than this is refreshed on the next detail request.
 const README_TTL_HOURS: i64 = 24;
@@ -356,6 +356,7 @@ pub async fn delete(
     .execute(&state.pool)
     .await?;
 
+    reports::resolve_for_target(&state.pool, "project", id, claims.sub, "content removed").await;
     Ok(StatusCode::NO_CONTENT)
 }
 
