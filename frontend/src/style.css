@@ -723,3 +723,129 @@ textarea::placeholder {
   border-bottom: 1px solid var(--line-strong);
   padding: 4px 12px 4px 0;
 }
+
+/* ============================================================================
+   Responsive: <= 768px turns the desktop shell into a top bar + bottom nav.
+   ========================================================================== */
+
+.mobile-nav-only {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Shell / sidebar become a bottom tab bar */
+  .shell {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: 49px;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    border-right: none;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+    overflow-x: auto;
+    gap: 0;
+  }
+
+  .sidebar-brand,
+  .sidebar-spacer,
+  .sidebar-foot {
+    display: none;
+  }
+
+  .nav-item {
+    flex: none;
+    height: 49px;
+    line-height: 49px;
+    padding: 0 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .nav-item.router-link-active,
+  .nav-item.router-link-exact-active {
+    border-top: 2px solid var(--text);
+  }
+
+  /* Only the top bar shows user/theme/logout on mobile */
+  .mobile-nav-only {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mainbar {
+    height: 34px;
+    padding: 0 12px;
+  }
+
+  .content {
+    padding: 16px 16px 72px;
+  }
+
+  h1 {
+    font-size: 16px;
+  }
+
+  .list-row .col-num {
+    min-width: 56px;
+    font-size: 11px;
+  }
+
+  .list-row .row-title {
+    font-size: 14px;
+  }
+
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+
+  .page-head-actions {
+    width: 100%;
+  }
+
+  .controls {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .controls .field {
+    width: 100%;
+  }
+
+  /* iOS zooms inputs whose font-size is below 16px */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Wide tables (admin users) scroll horizontally rather than squeezing */
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .form-stack {
+    max-width: 100%;
+  }
+
+  .kv-key {
+    width: 72px;
+  }
+}

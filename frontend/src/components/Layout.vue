@@ -63,7 +63,14 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
     <div class="main">
       <div class="mainbar">
         <span class="page-title">{{ String(route.name ?? '') }}</span>
-        <div class="mainbar-right"></div>
+        <div class="mainbar-right">
+          <!-- Only visible on <= 768px via .mobile-nav-only -->
+          <div class="mobile-nav-only">
+            <span class="user">{{ auth.username ?? '未登录' }}</span>
+            <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
+            <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
+          </div>
+        </div>
       </div>
       <main class="content">
         <RouterView />
