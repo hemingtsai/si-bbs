@@ -292,6 +292,129 @@ async fn liked_delta(
     Ok(())
 }
 
+/// Comments for one post, oldest first.
+pub async fn list_comments(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<Page<ForumComment>>, AppError> {
+    fetch_post(&state, id).await?;
+    let per_page = q.per_page.unwrap_or(50).clamp(1, 100);
+    let page = q.page.unwrap_or(1).max(1);
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM forum_comments WHERE post_id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    let rows: Vec<ForumComment> = sqlx::query_as(
+        "SELECT c.id, c.post_id, c.author_id, u.username AS author_username, c.content, \
+         c.likes_count, c.created_at \
+         FROM forum_comments c LEFT JOIN users u ON u.id = c.author_id \
+         WHERE c.post_id = ?1 AND c.deleted_at IS NULL ORDER BY c.created_at ASC, c.id ASC \
+         LIMIT ?2 OFFSET ?3",
+    )
+    .bind(id)
+    .bind(per_page)
+    .bind((page - 1) * per_page)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(Page {
+        items: rows,
+        total,
+        page,
+        per_page,
+    }))
+}
+
+/// Create a reply. No moderation.
+pub async fn create_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(input): Json<CommentInput>,
+) -> Result<(StatusCode, Json<ForumComment>), AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let content = input.content.trim();
+    if content.is_empty() {
+        return Err(AppError::BadRequest("content is required".into()));
+    }
+    if content.chars().count() > MAX_CONTENT_LEN {
+        return Err(AppError::BadRequest("content is too long".into()));
+    }
+    fetch_post(&state, id).await?;
+
+    let res = sqlx::query(
+        "INSERT INTO forum_comments (post_id, author_id, content) VALUES (?1, ?2, ?3)",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .bind(content)
+    .execute(&state.pool)
+    .await?;
+    let comment_id = res.last_insert_rowid();
+
+    sqlx::query("UPDATE forum_posts SET comments_count = comments_count + 1 WHERE id = ?1")
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+
+    let comment: ForumComment = sqlx::query_as(
+        "SELECT c.id, c.post_id, c.author_id, u.username AS author_username, c.content, \
+         c.likes_count, c.created_at \
+         FROM forum_comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = ?1",
+    )
+    .bind(comment_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok((StatusCode::CREATED, Json(comment)))
+}
+
+/// Author or staff soft-deletes a reply.
+pub async fn delete_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    let claims = require_auth(&state.cfg, &headers)?;
+    let row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT author_id, post_id FROM forum_comments WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (author_id, post_id) = row.ok_or(AppError::NotFound)?;
+    if author_id != claims.sub && !is_staff(&claims.role) {
+        return Err(AppError::Forbidden);
+    }
+
+    sqlx::query(
+        "UPDATE forum_comments SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?2 \
+         WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .execute(&state.pool)
+    .await?;
+    sqlx::query("UPDATE forum_posts SET comments_count = MAX(comments_count - 1, 0) WHERE id = ?1")
+        .bind(post_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Toggle a like on a comment.
+pub async fn like_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    toggle_like(state, headers, "comment", id).await
+}
+
 async fn fetch_post(state: &AppState, id: i64) -> Result<ForumPostOut, AppError> {
     let sql = format!(
         "{POST_SELECT} WHERE p.id = ?1 AND p.deleted_at IS NULL"
