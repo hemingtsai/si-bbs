@@ -60,6 +60,15 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 
 > 监听地址由 `BIND_ADDR` 决定（默认 `0.0.0.0:3000`），代码里没有 `PORT`。
 
+### 密码找回目前依赖日志
+
+还没有邮件投递能力：`POST /api/auth/forgot` 会把重置链接打到**服务端 WARN 日志**
+（`password reset link (no mailer configured): https://…/reset?token=…`），
+需要管理员转达给用户。响应体永远不含 token，token 也只在库里存 SHA-256 摘要、
+一次性、30 分钟过期。要变成真正的自助流程，需要接入 SMTP（例如 lettre）并把
+投递渠道从日志切过去。生产建议同时设置 `PUBLIC_BASE_URL`，否则链接里的
+`http://127.0.0.1:3000` 对用户无意义。
+
 ### 探针、日志与停机
 
 - **`GET /api/health` 会执行 `SELECT 1`**：只监听但连不上 SQLite 时返回 503

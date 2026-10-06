@@ -36,6 +36,8 @@
 | --- | --- | --- | --- | --- |
 | POST | `/api/auth/register` | `{username, email, password}` | 201 `{role}` | 用户名 3–32 字符且只允许字母/数字/`_`/`-`；邮箱需含单个 `@` 与带点域名且 ≤254 字符；密码 6–128 **字符**。用户名或邮箱重复（**忽略大小写**）返回 409；超限返回 400；注册接口有进程级配额，超限 429 |
 | POST | `/api/auth/login` | `{username, password}` | 200 `{access_token, refresh_token, role, user_id, username}` | 封禁账号返回 403；同一账号（忽略大小写）在 5 分钟内失败 8 次后返回 429 并带 `Retry-After`，登录成功即清零 |
+| POST | `/api/auth/forgot` | `{email}` | 202 `{status}` | 申请重置链接。**无论邮箱是否存在都返回同一个 202 体**（否则就是账号存在性预言机），响应里也绝不含 token。按地址与进程双重限流，被限流时同样返回通用 202 |
+| POST | `/api/auth/reset` | `{token, new_password}` | 200 `{status}` | 用链接里的 token 设新密码。token 一次性、30 分钟过期、请求新链接会作废旧的；成功后 `token_version` 自增，**所有既有会话失效**（不会自动登录）。token 无效/过期/已用一律 400，不区分原因 |
 | POST | `/api/auth/refresh` | `{refresh_token}` | 200 `{access_token, refresh_token}` | 会重新读取数据库角色；被封禁或被删返回 403/401 |
 | GET | `/api/auth/me` | — | 200 `{id, username, email, role, banned}` | 角色以数据库为准 |
 | GET | `/api/auth/profile` | 登录 | 自己的资料：`{id, username, display_name, email, bio, avatar_url, role, banned, created_at}` |
@@ -133,6 +135,18 @@
 | PATCH | `/api/admin/users/{id}/role` | `{role}`，不能降级唯一的 admin，不能降级自己 |
 | PATCH | `/api/admin/users/{id}/ban` | `{banned: true|false}`，不可封禁自己或唯一的 admin |
 | GET | `/api/admin/stats` | `{users, users_banned, projects, projects_pending, projects_approved, wiki_published, comments, ratings, trashed}` |
+
+## 密码找回的投递方式
+
+`POST /api/auth/forgot` 需要一个投递渠道，而本仓库**还没有邮件发送能力**（没有
+SMTP 配置、也没有引入邮件依赖）。因此当前行为是：把形如
+`{PUBLIC_BASE_URL}/reset?token=…` 的链接写入**服务端 WARN 日志**，由运维/管理员
+转达；响应体里永远不含 token。这是有意的降级而不是假装发信：
+
+- token 只存 SHA-256 摘要，库被读走也拿不到可用链接；一次性、30 分钟、单活跃。
+- 日志里出现的是 user_id 与链接，管理员本来就能直接改库/改文件，所以没有提权。
+- 要真正"自助"，需要接入邮件投递（例如 lettre + SMTP 环境变量），
+  这是部署侧的下一步，见 `docs/deployment.md`。
 
 ## 举报
 

@@ -8,7 +8,7 @@ use crate::middleware::auth::require_auth;
 use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
-use crate::services::validate;
+use crate::services::{password_reset, validate};
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
@@ -430,4 +430,103 @@ async fn profile_of(state: &AppState, user_id: i64) -> Result<serde_json::Value,
         "banned": row.banned != 0,
         "created_at": row.created_at,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct ForgotReq {
+    pub email: String,
+}
+
+/// Request a password reset link.
+///
+/// Always answers 202 with the same body, whether or not the address exists:
+/// otherwise this endpoint becomes an account-existence oracle. Delivery is the
+/// missing piece — see the note in `docs/deployment.md`; without a mailer the link
+/// is written to the server log, which is why the response never contains it.
+pub async fn forgot_password(
+    State(state): State<AppState>,
+    Json(body): Json<ForgotReq>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let generic = (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "status": "if the address exists, a reset link has been issued"
+        })),
+    );
+
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() {
+        return Ok(generic);
+    }
+    // Per-address and process-wide budgets: this endpoint hashes and writes.
+    let key = format!("forgot:{email}");
+    if state.register_limiter.retry_after(&key).is_some()
+        || state
+            .register_limiter
+            .retry_after("forgot:global")
+            .is_some()
+    {
+        // Still generic: a 429 here would reveal that the address is interesting.
+        tracing::warn!(%email, "password reset request throttled");
+        return Ok(generic);
+    }
+    state.register_limiter.record(&key);
+    state.register_limiter.record("forgot:global");
+
+    let user: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = ?1 AND banned = 0")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await?;
+
+    let Some(user_id) = user else {
+        // Same shape, no work.
+        return Ok(generic);
+    };
+
+    let token = password_reset::create(&state.pool, user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let base = crate::services::feed::base_url(&state.cfg.public_base_url, None, None);
+    // Loud on purpose: with no mailer configured this log line *is* the delivery
+    // channel, and docs/deployment.md says so.
+    tracing::warn!(
+        user_id,
+        "password reset link (no mailer configured): {base}/reset?token={token}"
+    );
+
+    Ok(generic)
+}
+
+#[derive(Deserialize)]
+pub struct ResetReq {
+    pub token: String,
+    pub new_password: String,
+}
+
+/// Complete a reset with the token from the reset link.
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Json(body): Json<ResetReq>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    validate::password(&body.new_password).map_err(AppError::BadRequest)?;
+    if body.token.trim().is_empty() {
+        return Err(AppError::BadRequest("token is required".into()));
+    }
+
+    let new_hash = auth::hash_password(&body.new_password)
+        .await
+        .map_err(AppError::Internal)?;
+
+    let user_id = password_reset::consume(&state.pool, &body.token, &new_hash)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::BadRequest("this reset link is invalid or has expired".into()))?;
+
+    tracing::info!(
+        user_id,
+        "password reset completed; all sessions invalidated"
+    );
+    Ok(Json(serde_json::json!({ "status": "password updated" })))
 }

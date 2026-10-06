@@ -73,6 +73,8 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/password", post(auth::change_password))
         .route("/api/auth/email", post(auth::change_email))
+        .route("/api/auth/forgot", post(auth::forgot_password))
+        .route("/api/auth/reset", post(auth::reset_password))
         .route(
             "/api/auth/profile",
             get(auth::profile).patch(auth::update_profile),

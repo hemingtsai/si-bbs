@@ -19,6 +19,7 @@ async fn migrations_apply_cleanly() {
             "forum_likes",
             "forum_posts",
             "forum_rules",
+            "password_resets",
             "projects",
             "ratings",
             "users",

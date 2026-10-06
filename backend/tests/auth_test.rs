@@ -491,3 +491,169 @@ async fn display_names_replace_the_login_name_on_public_content() {
         .json::<serde_json::Value>();
     assert_eq!(me["username"], "alice");
 }
+
+/// Recovery without a mailer: the token goes to the server log, so the test takes
+/// the real token from the service layer (the same value the log line carries) and
+/// pushes it through the public endpoint. The response never contains it.
+#[tokio::test]
+async fn password_reset_round_trip_invalidates_old_sessions() {
+    let (server, pool) = common::test_ctx().await;
+    common::register(&server, "nancy").await;
+    let stale = common::login(&server, "nancy").await;
+
+    // Unknown address answers exactly like a known one: no enumeration oracle, and
+    // nothing token-shaped in the body.
+    let unknown = server
+        .post("/api/auth/forgot")
+        .json(&json!({"email": "nobody@example.com"}))
+        .await;
+    unknown.assert_status(axum::http::StatusCode::ACCEPTED);
+    let generic = unknown.json::<serde_json::Value>();
+    assert_eq!(
+        generic["status"],
+        "if the address exists, a reset link has been issued"
+    );
+    assert!(!generic.to_string().to_lowercase().contains("token"));
+
+    let known = server
+        .post("/api/auth/forgot")
+        .json(&json!({"email": "NANCY@example.com"}))
+        .await;
+    known.assert_status(axum::http::StatusCode::ACCEPTED);
+    assert_eq!(known.json::<serde_json::Value>(), generic);
+
+    // Only a hash is persisted, and it is not the token.
+    let stored: Vec<String> = sqlx::query_scalar("SELECT token_hash FROM password_resets")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].len(), 64);
+
+    // The account really has a live link: mint one through the same service the
+    // handler uses and walk it through the HTTP endpoint.
+    let user_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'nancy'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let token = si_bbs_backend::services::password_reset::create(&pool, user_id)
+        .await
+        .expect("mint reset token");
+    // Minting a second link retires the first one.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM password_resets WHERE user_id = ?1 AND used_at IS NULL"
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+
+    // Wrong token, and a too-short new password.
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": "f".repeat(64), "new_password": "reset-pass-1"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": token, "new_password": "short"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": "", "new_password": "reset-pass-1"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": token, "new_password": "reset-pass-1"}))
+        .await
+        .assert_status_ok();
+
+    // Single use.
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": token, "new_password": "reset-pass-2"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    // The new password works, the old one does not, and the pre-reset session died.
+    server
+        .post("/api/auth/login")
+        .json(&json!({"username": "nancy", "password": "password123"}))
+        .await
+        .assert_status_unauthorized();
+    server
+        .post("/api/auth/login")
+        .json(&json!({"username": "nancy", "password": "reset-pass-1"}))
+        .await
+        .assert_status_ok();
+    server
+        .get("/api/auth/me")
+        .add_header("Authorization", format!("Bearer {stale}"))
+        .await
+        .assert_status_unauthorized();
+}
+
+#[tokio::test]
+async fn an_expired_reset_link_is_refused() {
+    let (server, pool) = common::test_ctx().await;
+    common::register(&server, "oscar").await;
+    let user_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'oscar'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let token = si_bbs_backend::services::password_reset::create(&pool, user_id)
+        .await
+        .expect("mint reset token");
+    // Age it past its expiry.
+    sqlx::query("UPDATE password_resets SET expires_at = datetime('now', '-1 minute')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    server
+        .post("/api/auth/reset")
+        .json(&json!({"token": token, "new_password": "reset-pass-1"}))
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    // …and the password was not changed.
+    server
+        .post("/api/auth/login")
+        .json(&json!({"username": "oscar", "password": "password123"}))
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
+async fn reporting_a_banned_account_does_not_issue_a_link() {
+    let (server, pool) = common::test_ctx().await;
+    common::register(&server, "peggy").await;
+    let user_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'peggy'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET banned = 1 WHERE id = ?1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Still the generic answer…
+    server
+        .post("/api/auth/forgot")
+        .json(&json!({"email": "peggy@example.com"}))
+        .await
+        .assert_status(axum::http::StatusCode::ACCEPTED);
+    // …but no token was created for a banned account.
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM password_resets")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
