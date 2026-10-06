@@ -58,6 +58,11 @@ pub fn test_config(github_api_base: &str) -> Config {
         github_token: String::new(),
         github_api_base: github_api_base.to_string(),
         public_base_url: String::new(),
+        upload_dir: std::env::temp_dir()
+            .join("si-bbs-test-uploads")
+            .to_string_lossy()
+            .into_owned(),
+        max_upload_bytes: 5 * 1024 * 1024,
     }
 }
 

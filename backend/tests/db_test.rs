@@ -12,6 +12,7 @@ async fn migrations_apply_cleanly() {
     assert_eq!(
         tables,
         vec![
+            "attachments",
             "audit_log",
             "comments",
             "content_reports",

@@ -167,6 +167,30 @@ SMTP 配置、也没有引入邮件依赖）。因此当前行为是：把形如
 - 要真正"自助"，需要接入邮件投递（例如 lettre + SMTP 环境变量），
   这是部署侧的下一步，见 `docs/deployment.md`。
 
+## 附件
+
+登录用户可以上传图片、PDF 与纯文本/Markdown，最大 5MB（`MAX_UPLOAD_BYTES`），
+文件落在 `UPLOAD_DIR`（镜像内为 `/data/uploads`，与数据库同卷，否则重启即丢）。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/attachments` | 登录 | `multipart/form-data`，字段名 `file`。返回 `{id, filename, content_type, size_bytes, url, markdown}`，`markdown` 可直接粘进正文 |
+| GET | `/api/attachments/{id}` | 公开 | 按存储时的类型返回字节。图片 `Content-Disposition: inline`，其余 `attachment`（不在本站源里当文档渲染）；`Cache-Control: immutable` |
+| DELETE | `/api/attachments/{id}` | 上传者/mod+ | 软删除，进回收站（`kind=attachment`），可 restore |
+
+安全约束（都有测试）：
+
+- **声明的 `Content-Type` 不算数**：必须同时命中允许列表（png/jpeg/gif/webp/pdf/
+  text/plain/text/markdown）**且**与文件头魔数一致。谎称是图片的 HTML 一律 400；
+  SVG 与 HTML 故意不在允许列表内——它们能携带脚本，而响应来自本站源。
+- 文本类型额外要求正文是合法 UTF-8。
+- **存储路径由服务端生成**（两层目录 + 随机名 + 由魔数推出的扩展名），上传时的
+  文件名只作为展示标签（去掉路径分隔符与控制字符）。因此 `../../etc/passwd`
+  这类名字既不能决定落盘位置，也不能注入响应头。
+- 上传路由单独放宽 body 上限（axum 默认 2MB），超限在建表之前就返回 400。
+- 彻底删除（回收站 purge）会同时删掉磁盘文件；文件缺失只记日志（先删行、
+  再删文件，宁可留孤儿文件也不让 purge 失败）。
+
 ## 举报
 
 任何登录用户都可以举报**公开且未删除**的内容（软删的帖子、草稿 wiki、待审项目

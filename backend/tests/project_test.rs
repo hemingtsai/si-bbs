@@ -818,6 +818,11 @@ async fn github_token_is_sent_when_configured() {
         github_token: "test-token".into(),
         github_api_base: gh.uri(),
         public_base_url: String::new(),
+        upload_dir: std::env::temp_dir()
+            .join("si-bbs-test-uploads")
+            .to_string_lossy()
+            .into_owned(),
+        max_upload_bytes: 5 * 1024 * 1024,
     };
     let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState::new(pool, cfg));
     let server = TestServer::new(app);

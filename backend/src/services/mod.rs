@@ -6,4 +6,5 @@ pub mod github;
 pub mod password_reset;
 pub mod ratelimit;
 pub mod reports;
+pub mod upload;
 pub mod validate;

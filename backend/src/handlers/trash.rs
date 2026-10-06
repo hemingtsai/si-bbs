@@ -15,7 +15,14 @@ use crate::services::audit;
 /// asserts the two stay in step: a kind present in the view but missing here
 /// cannot be restored or purged, and one listed here but absent from the view
 /// makes both operations answer 404 forever.
-pub const KINDS: [&str; 5] = ["wiki", "project", "comment", "forum_post", "forum_comment"];
+pub const KINDS: [&str; 6] = [
+    "wiki",
+    "project",
+    "comment",
+    "forum_post",
+    "forum_comment",
+    "attachment",
+];
 
 /// Map a public kind to its table. Whitelisted so the name can be interpolated
 /// into SQL safely; SQLite cannot bind identifiers.
@@ -26,6 +33,7 @@ fn table_for(kind: &str) -> Result<&'static str, AppError> {
         "comment" => Ok("comments"),
         "forum_post" => Ok("forum_posts"),
         "forum_comment" => Ok("forum_comments"),
+        "attachment" => Ok("attachments"),
         _ => Err(AppError::NotFound),
     }
 }
@@ -238,6 +246,16 @@ pub async fn purge(
 
     // Written inside the same transaction: "an admin destroyed this row" must not
     // survive on its own if the delete rolls back, nor go missing if it commits.
+    // Collect the file path before the row disappears, then delete it after commit.
+    let stored_file: Option<String> = if kind == "attachment" {
+        sqlx::query_scalar("SELECT storage_path FROM attachments WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+    } else {
+        None
+    };
+
     audit::record(
         &mut *tx,
         claims.sub,
@@ -249,5 +267,9 @@ pub async fn purge(
     .await?;
 
     tx.commit().await?;
+
+    if let Some(path) = stored_file {
+        crate::handlers::attachment::remove_stored_file(&state, &path).await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }

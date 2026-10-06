@@ -492,6 +492,16 @@ async fn trash_view_only_contains_known_kinds() {
         .await
         .assert_status(axum::http::StatusCode::NO_CONTENT);
 
+    // And an attachment, which joins the bin like every other kind.
+    sqlx::query(
+        "INSERT INTO attachments \
+         (uploader_id, filename, content_type, size_bytes, storage_path, deleted_at) \
+         VALUES (1, 'deleted.png', 'image/png', 12, 'ab/cd/deleted.png', CURRENT_TIMESTAMP)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let mut view_kinds: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM trash_view")
         .fetch_all(&pool)
         .await

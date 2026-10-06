@@ -36,9 +36,10 @@ COPY --from=frontend --chown=sibbs:sibbs /app/frontend/dist ./static
 # so shipping the directory too would only invite editing files that nothing reads.
 ENV STATIC_DIR=/app/static \
     DATABASE_URL=sqlite:///data/si-bbs.db?mode=rwc \
+    UPLOAD_DIR=/data/uploads \
     RUST_LOG=si_bbs_backend=info,tower_http=info
 # Only the data volume needs an owner; a named volume inherits it on first use.
-RUN mkdir -p /data && chown sibbs:sibbs /data
+RUN mkdir -p /data/uploads && chown sibbs:sibbs /data
 USER sibbs
 EXPOSE 3000
 VOLUME ["/data"]

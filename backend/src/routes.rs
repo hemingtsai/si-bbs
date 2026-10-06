@@ -17,7 +17,9 @@ use tracing::Level;
 const COMPRESSION_MIN_BYTES: u16 = 1024;
 
 use crate::config::Config;
-use crate::handlers::{admin, auth, comment, feed, forum, project, rating, report, trash, wiki};
+use crate::handlers::{
+    admin, attachment, auth, comment, feed, forum, project, rating, report, trash, wiki,
+};
 use crate::services::ratelimit::{self, RateLimiter};
 
 #[derive(Clone)]
@@ -147,6 +149,17 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .route(
             "/api/forum/rules/{board}",
             axum::routing::put(forum::upsert_rule),
+        )
+        // Attachments. The body limit is raised for this route only: axum's default
+        // is 2MB, and MAX_UPLOAD_BYTES is 5MB plus multipart framing.
+        .route(
+            "/api/attachments",
+            post(attachment::upload).layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .route("/api/attachments/{id}", get(attachment::serve))
+        .route(
+            "/api/attachments/{id}",
+            axum::routing::delete(attachment::delete),
         )
         // Reports.
         .route("/api/reports", get(report::list).post(report::create))

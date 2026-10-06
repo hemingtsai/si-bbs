@@ -20,6 +20,10 @@ pub struct Config {
     /// Absolute public origin used to build links inside RSS feeds, e.g.
     /// `https://sibbs.cn`. Empty means "derive it from the proxy headers".
     pub public_base_url: String,
+    /// Where uploaded attachments are written.
+    pub upload_dir: String,
+    /// Largest accepted upload, in bytes.
+    pub max_upload_bytes: usize,
 }
 
 /// Decide which JWT secret the process is allowed to run with.
@@ -94,6 +98,11 @@ impl Config {
             github_api_base: env::var("GITHUB_API_BASE")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             public_base_url: env::var("PUBLIC_BASE_URL").unwrap_or_default(),
+            upload_dir: env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".into()),
+            max_upload_bytes: env::var("MAX_UPLOAD_BYTES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5 * 1024 * 1024),
         })
     }
 }

@@ -25,14 +25,18 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
         ),
     );
 
-    // Hashed /assets/* can be cached forever; everything else revalidates.
-    if path.starts_with("/assets/") {
-        h.insert(
-            "cache-control",
-            HeaderValue::from_static("public, max-age=31536000, immutable"),
-        );
-    } else {
-        h.insert("cache-control", HeaderValue::from_static("no-cache"));
+    // Hashed /assets/* can be cached forever; everything else revalidates. A
+    // handler that set its own policy wins — attachments, for instance, are
+    // immutable too, and blindly overwriting would have made them uncacheable.
+    if !h.contains_key("cache-control") {
+        if path.starts_with("/assets/") {
+            h.insert(
+                "cache-control",
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+        } else {
+            h.insert("cache-control", HeaderValue::from_static("no-cache"));
+        }
     }
 
     // A static response may come from the `.br`/`.gz` sibling depending on the
