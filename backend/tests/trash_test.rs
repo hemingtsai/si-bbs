@@ -460,3 +460,190 @@ async fn trash_routes_are_mounted_in_the_shared_router() {
     };
     let _router: axum::Router = si_bbs_backend::create_router(AppState { pool, cfg });
 }
+
+/// Regression: `comments.project_id` and `ratings.project_id` have no
+/// `ON DELETE` rule, so purging a project that was commented on or rated used to
+/// fail with `FOREIGN KEY constraint failed` and surface as a 500.
+#[tokio::test]
+async fn purging_a_project_removes_its_comments_and_ratings() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let project_id = seed_project(&pool, "alice", "approved", "purge-me").await;
+
+    let bob = register_and_login(&server, "bob").await;
+    seed_comment(&pool, "bob", project_id, "first").await;
+    server
+        .post(&format!("/api/projects/{project_id}/rating"))
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .json(&serde_json::json!({ "score": 8, "comment": "solid" }))
+        .await
+        .assert_status_ok();
+
+    server
+        .delete(&format!("/api/projects/{project_id}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    server
+        .delete(&format!("/api/trash/project/{project_id}"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let projects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = ?1")
+        .bind(project_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let comments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comments WHERE project_id = ?1")
+        .bind(project_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let ratings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ratings WHERE project_id = ?1")
+        .bind(project_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((projects, comments, ratings), (0, 0, 0));
+}
+
+/// Regression: same foreign-key trap one level down — a post with replies (and
+/// likes on both) could not be purged.
+#[tokio::test]
+async fn purging_a_forum_post_removes_replies_and_likes() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let bob = register_and_login(&server, "bob").await;
+
+    let post = server
+        .post("/api/forum/posts")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"board":"life","title":"doomed","content":"x"}))
+        .await
+        .json::<serde_json::Value>();
+    let post_id = post["id"].as_i64().unwrap();
+
+    let reply = server
+        .post(&format!("/api/forum/posts/{post_id}/comments"))
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .json(&serde_json::json!({"content":"reply"}))
+        .await
+        .json::<serde_json::Value>();
+    let reply_id = reply["id"].as_i64().unwrap();
+
+    // Likes on the post and on the reply must both be cleaned up.
+    for (path, token) in [
+        (format!("/api/forum/posts/{post_id}/like"), &alice),
+        (format!("/api/forum/comments/{reply_id}/like"), &bob),
+    ] {
+        server
+            .post(&path)
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await
+            .assert_status_ok();
+    }
+
+    server
+        .delete(&format!("/api/forum/posts/{post_id}"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    server
+        .delete(&format!("/api/trash/forum_post/{post_id}"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let posts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_posts WHERE id = ?1")
+        .bind(post_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let replies: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM forum_comments WHERE post_id = ?1")
+            .bind(post_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let likes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((posts, replies, likes), (0, 0, 0));
+}
+
+/// Purging a single reply must not touch its post, and must drop that reply's
+/// likes only.
+#[tokio::test]
+async fn purging_a_forum_comment_keeps_the_post_and_drops_its_likes() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let bob = register_and_login(&server, "bob").await;
+
+    let post_id = server
+        .post("/api/forum/posts")
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .json(&serde_json::json!({"board":"life","title":"survivor","content":"x"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+
+    let mut replies = Vec::new();
+    for content in ["keep me", "delete me"] {
+        let id = server
+            .post(&format!("/api/forum/posts/{post_id}/comments"))
+            .add_header("Authorization", format!("Bearer {bob}"))
+            .json(&serde_json::json!({ "content": content }))
+            .await
+            .json::<serde_json::Value>()["id"]
+            .as_i64()
+            .unwrap();
+        replies.push(id);
+    }
+    let doomed = replies[1];
+
+    server
+        .post(&format!("/api/forum/comments/{doomed}/like"))
+        .add_header("Authorization", format!("Bearer {alice}"))
+        .await
+        .assert_status_ok();
+
+    server
+        .delete(&format!("/api/forum/comments/{doomed}"))
+        .add_header("Authorization", format!("Bearer {bob}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+    server
+        .delete(&format!("/api/trash/forum_comment/{doomed}"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let reply: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_comments WHERE id = ?1")
+        .bind(doomed)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_comments WHERE id = ?1")
+        .bind(replies[0])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let post: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_posts WHERE id = ?1")
+        .bind(post_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let likes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_likes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((reply, kept, post, likes), (0, 1, 1, 0));
+}

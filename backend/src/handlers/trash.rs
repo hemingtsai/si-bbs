@@ -151,7 +151,40 @@ pub async fn restore(
     ))
 }
 
-/// Permanently remove a trashed item. Admin only.
+/// Rows that reference a purged parent, paired with the predicate selecting
+/// them, **in the order they must be deleted**. Every identifier here is a
+/// literal from this table, never anything from the request, so interpolating it
+/// into SQL is safe.
+///
+/// `comments.project_id`, `ratings.project_id` and `forum_comments.post_id` are
+/// declared without `ON DELETE`, and SQLite enforces foreign keys, so a parent
+/// row cannot be removed while children exist. `forum_likes` has no foreign key
+/// at all, but deleting its rows together with the target stops the likes table
+/// from accumulating permanent orphans.
+fn children_for(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "project" => &[
+            ("comments", "project_id = ?1"),
+            ("ratings", "project_id = ?1"),
+        ],
+        "forum_post" => &[
+            // Must run while forum_comments still exists, hence the subquery.
+            (
+                "forum_likes",
+                "target_kind = 'comment' AND target_id IN \
+                 (SELECT id FROM forum_comments WHERE post_id = ?1)",
+            ),
+            ("forum_likes", "target_kind = 'post' AND target_id = ?1"),
+            ("forum_comments", "post_id = ?1"),
+        ],
+        "forum_comment" => &[("forum_likes", "target_kind = 'comment' AND target_id = ?1")],
+        _ => &[],
+    }
+}
+
+/// Permanently remove a trashed item and everything that hangs off it. Admin
+/// only. The existence check, the child deletions and the parent deletion share
+/// one transaction, so a failure part-way through leaves the bin as it was.
 pub async fn purge(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -163,10 +196,29 @@ pub async fn purge(
     }
     let table = table_for(&kind)?;
 
-    let sql = format!("DELETE FROM {table} WHERE id = ?1 AND deleted_at IS NOT NULL");
-    let res = sqlx::query(&sql).bind(id).execute(&state.pool).await?;
-    if res.rows_affected() == 0 {
+    let mut tx = state.pool.begin().await?;
+
+    let trashed: Option<i64> = sqlx::query_scalar(&format!(
+        "SELECT id FROM {table} WHERE id = ?1 AND deleted_at IS NOT NULL"
+    ))
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if trashed.is_none() {
         return Err(AppError::NotFound);
     }
+
+    for (child_table, predicate) in children_for(&kind) {
+        sqlx::query(&format!("DELETE FROM {child_table} WHERE {predicate}"))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query(&format!("DELETE FROM {table} WHERE id = ?1"))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -42,7 +42,13 @@ impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let status = self.status();
         let body = match &self {
-            Self::Internal(_) => json!({ "error": "internal server error" }),
+            // The client only ever gets a generic message, so this log line is the
+            // only place the real cause survives: `From<sqlx::Error>` funnels the
+            // driver message in here and nowhere else.
+            Self::Internal(m) => {
+                tracing::error!(error = %m, "internal server error");
+                json!({ "error": "internal server error" })
+            }
             Self::BadRequest(m) => json!({ "error": m }),
             Self::Conflict(m) => json!({ "error": m }),
             Self::NotFound => json!({ "error": "not found" }),
