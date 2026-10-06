@@ -23,7 +23,9 @@ async fn migrations_apply_cleanly() {
             "projects",
             "ratings",
             "users",
-            "wiki_pages"
+            "wiki_pages",
+            "wiki_revisions",
+            "wiki_slug_aliases"
         ]
     );
 }

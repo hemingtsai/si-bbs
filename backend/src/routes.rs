@@ -86,6 +86,12 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .route("/api/wiki/{slug}", get(wiki::detail))
         .route("/api/wiki/page/{id}", axum::routing::put(wiki::update))
         .route("/api/wiki/page/{id}", axum::routing::delete(wiki::delete))
+        .route("/api/wiki/page/{id}/revisions", get(wiki::revisions))
+        .route(
+            "/api/wiki/page/{id}/revisions/{no}",
+            get(wiki::revision_detail),
+        )
+        .route("/api/wiki/page/{id}/revert/{no}", post(wiki::revert))
         .route("/api/projects", get(project::list).post(project::submit))
         .route("/api/projects/mine", get(project::mine))
         .route("/api/projects/review-queue", get(project::review_queue))

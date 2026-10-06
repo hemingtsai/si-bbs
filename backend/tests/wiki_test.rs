@@ -409,3 +409,367 @@ async fn _pool_or(server: &TestServer) -> SqlitePool {
     let _ = server;
     common::test_pool().await
 }
+
+/// History: every save is a snapshot, and a stale editor cannot silently overwrite
+/// someone else's work.
+#[tokio::test]
+async fn every_save_is_recorded_and_stale_edits_are_refused() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+
+    let created = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "版本页面", "category": "c", "content": "v1", "status": "published",
+        }))
+        .await;
+    created.assert_status(axum::http::StatusCode::CREATED);
+    let page = created.json::<serde_json::Value>();
+    let id = page["id"].as_i64().unwrap();
+    assert_eq!(page["revision"], 1, "creation must be revision 1");
+
+    // Saving without base_revision works (read-then-write) and bumps the revision.
+    let updated = server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "版本页面", "category": "c", "content": "v2", "status": "published",
+        }))
+        .await;
+    updated.assert_status_ok();
+    assert_eq!(updated.json::<serde_json::Value>()["revision"], 2);
+
+    // An editor who started from revision 1 is now stale.
+    let stale = server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "版本页面", "category": "c", "content": "v1-edited",
+            "status": "published", "base_revision": 1,
+        }))
+        .await;
+    stale.assert_status(axum::http::StatusCode::CONFLICT);
+    // …and nothing was written.
+    let detail = server
+        .get(&format!("/api/wiki/page/{id}/revisions/2"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(detail["content"], "v2");
+
+    // Up-to-date editors succeed.
+    let ok = server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "版本页面", "category": "c", "content": "v3",
+            "status": "published", "base_revision": 2, "comment": "小修",
+        }))
+        .await;
+    ok.assert_status_ok();
+    assert_eq!(ok.json::<serde_json::Value>()["revision"], 3);
+
+    // History is newest-first metadata only.
+    let history = server
+        .get(&format!("/api/wiki/page/{id}/revisions"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(history["total"], 3);
+    let items = history["items"].as_array().unwrap();
+    assert_eq!(items[0]["revision_no"], 3);
+    assert_eq!(items[0]["comment"], "小修");
+    assert_eq!(items[1]["revision_no"], 2);
+    assert_eq!(items[2]["revision_no"], 1);
+    assert!(
+        items[0]["content"].is_null(),
+        "history must not ship bodies"
+    );
+    assert_eq!(items[2]["author_username"], "alice");
+
+    // A single revision carries the body.
+    let first = server
+        .get(&format!("/api/wiki/page/{id}/revisions/1"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(first["content"], "v1");
+    server
+        .get(&format!("/api/wiki/page/{id}/revisions/99"))
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn reverting_appends_a_new_revision_instead_of_rewriting_history() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+    let id = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "回滚页面", "category": "c", "content": "第一版", "status": "published",
+        }))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    for content in ["第二版", "第三版"] {
+        server
+            .put(&format!("/api/wiki/page/{id}"))
+            .add_header("Authorization", auth.clone())
+            .json(&serde_json::json!({
+                "title": "回滚页面", "category": "c", "content": content, "status": "published",
+            }))
+            .await
+            .assert_status_ok();
+    }
+
+    let reverted = server
+        .post(&format!("/api/wiki/page/{id}/revert/1"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({}))
+        .await;
+    reverted.assert_status_ok();
+    let page = reverted.json::<serde_json::Value>();
+    assert_eq!(page["revision"], 4, "a revert is a new revision");
+    assert_eq!(page["content"], "第一版");
+
+    // Revision 3 is still there, untouched.
+    let third = server
+        .get(&format!("/api/wiki/page/{id}/revisions/3"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(third["content"], "第三版");
+    let fourth = server
+        .get(&format!("/api/wiki/page/{id}/revisions/4"))
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(fourth["content"], "第一版");
+    assert_eq!(fourth["comment"], "revert to revision 1");
+
+    // Reverting from a stale base is refused, and a missing revision is a 404.
+    server
+        .post(&format!("/api/wiki/page/{id}/revert/4"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({"base_revision": 1}))
+        .await
+        .assert_status(axum::http::StatusCode::CONFLICT);
+    server
+        .post(&format!("/api/wiki/page/{id}/revert/99"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({}))
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn revisions_of_a_draft_are_private_but_a_published_page_history_is_public() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+
+    let draft = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({"title":"草稿页","category":"c","content":"x"}))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    // Strangers cannot see a draft's history…
+    server
+        .get(&format!("/api/wiki/page/{draft}/revisions"))
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    // …the author can.
+    server
+        .get(&format!("/api/wiki/page/{draft}/revisions"))
+        .add_header("Authorization", auth.clone())
+        .await
+        .assert_status_ok();
+
+    let published = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title":"公开页","category":"c","content":"x","status":"published",
+        }))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .get(&format!("/api/wiki/page/{published}/revisions"))
+        .await
+        .assert_status_ok();
+}
+
+/// A wiki URL is identity: renaming must not break the old one, and the old one
+/// must not be handed to somebody else.
+#[tokio::test]
+async fn a_page_slug_can_be_changed_and_the_old_url_still_resolves() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+
+    // A Chinese title used to mean an unreadable `page-<millis>` URL and no way to
+    // fix it; now the slug can be set explicitly.
+    let created = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "中文标题", "category": "c", "content": "正文",
+            "status": "published", "slug": "zhongwen-biaoti",
+        }))
+        .await;
+    created.assert_status(axum::http::StatusCode::CREATED);
+    let id = created.json::<serde_json::Value>()["id"].as_i64().unwrap();
+    assert_eq!(
+        created.json::<serde_json::Value>()["slug"],
+        "zhongwen-biaoti"
+    );
+
+    // The same slug cannot be taken by another page.
+    server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "另一个", "category": "c", "content": "x", "slug": "zhongwen-biaoti",
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CONFLICT);
+
+    // Rename it.
+    let renamed = server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "中文标题", "category": "c", "content": "正文",
+            "status": "published", "slug": "renamed-page",
+        }))
+        .await;
+    renamed.assert_status_ok();
+    assert_eq!(renamed.json::<serde_json::Value>()["slug"], "renamed-page");
+
+    // The new URL works…
+    let by_new = server.get("/api/wiki/renamed-page").await;
+    by_new.assert_status_ok();
+    assert_eq!(by_new.json::<serde_json::Value>()["id"], id);
+    // …and so does the old one, answering with the canonical slug so a client can
+    // rewrite its URL.
+    let by_old = server.get("/api/wiki/zhongwen-biaoti").await;
+    by_old.assert_status_ok();
+    let body = by_old.json::<serde_json::Value>();
+    assert_eq!(body["id"], id);
+    assert_eq!(body["slug"], "renamed-page");
+
+    // A new page cannot steal the retired slug and shadow the redirect.
+    server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "抢注", "category": "c", "content": "x", "slug": "zhongwen-biaoti",
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CONFLICT);
+    let still = server
+        .get("/api/wiki/zhongwen-biaoti")
+        .await
+        .json::<serde_json::Value>();
+    assert_eq!(still["id"], id);
+}
+
+#[tokio::test]
+async fn slugs_that_would_shadow_a_route_or_break_the_url_are_refused() {
+    let (server, _pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let auth = format!("Bearer {alice}");
+
+    for bad in [
+        "mine",
+        "categories",
+        "page",
+        "new",
+        "-lead",
+        "trail-",
+        "has space",
+        "有中文",
+        "a/b",
+    ] {
+        server
+            .post("/api/wiki")
+            .add_header("Authorization", auth.clone())
+            .json(&serde_json::json!({
+                "title": "标题", "category": "c", "content": "x", "slug": bad,
+            }))
+            .await
+            .assert_status(axum::http::StatusCode::BAD_REQUEST);
+    }
+    // Upper case is normalised, not rejected.
+    let ok = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "标题", "category": "c", "content": "x", "slug": "Mixed-Case",
+        }))
+        .await;
+    ok.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(ok.json::<serde_json::Value>()["slug"], "mixed-case");
+}
+
+/// The alias table references the page, so purging a renamed page from the bin must
+/// still work (the same foreign-key trap the purge path already handles elsewhere).
+#[tokio::test]
+async fn purging_a_renamed_page_cleans_up_its_aliases() {
+    let (server, pool) = test_ctx().await;
+    let alice = register_and_login(&server, "alice").await;
+    let admin = register_login_as_role(&server, &pool, "root", "admin").await;
+    let auth = format!("Bearer {alice}");
+
+    let id = server
+        .post("/api/wiki")
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "要删的", "category": "c", "content": "x",
+            "status": "published", "slug": "old-name",
+        }))
+        .await
+        .json::<serde_json::Value>()["id"]
+        .as_i64()
+        .unwrap();
+    server
+        .put(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .json(&serde_json::json!({
+            "title": "要删的", "category": "c", "content": "x",
+            "status": "published", "slug": "new-name",
+        }))
+        .await
+        .assert_status_ok();
+    server
+        .delete(&format!("/api/wiki/page/{id}"))
+        .add_header("Authorization", auth.clone())
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    server
+        .delete(&format!("/api/trash/wiki/{id}"))
+        .add_header("Authorization", format!("Bearer {admin}"))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let aliases: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wiki_slug_aliases")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let revisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wiki_revisions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (aliases, revisions),
+        (0, 0),
+        "cascade must clean both tables"
+    );
+}

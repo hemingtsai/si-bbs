@@ -108,10 +108,24 @@
 | GET | `/api/wiki?category=&q=&page=&per_page=` | 公开 | 只列 `published`，搜索标题和正文 |
 | GET | `/api/wiki/categories` | 公开 | `[{category, count}]`，已发布页面的分类统计 |
 | GET | `/api/wiki/mine` | 登录 | 当前用户的页面（草稿 + 已发布）；staff 可见所有 |
-| GET | `/api/wiki/{slug}` | 公开* | 草稿仅作者和 staff 可见，其他人 404 |
+| GET | `/api/wiki/{slug}` | 公开* | 草稿仅作者和 staff 可见，其他人 404。**改过 slug 的页面在旧 slug 上仍可访问**（按别名解析，返回体带当前 slug，客户端据此改写 URL） |
 | POST | `/api/wiki` | 登录 | `{title, category, content, status?}`，status 默认 `draft`；slug 自动生成且唯一 |
-| PUT | `/api/wiki/page/{id}` | 作者/staff | 更新标题、分类、正文、状态；slug 保持不变 |
+| PUT | `/api/wiki/page/{id}` | 作者/staff | 更新标题、分类、正文、状态，可选 `slug`（改名后旧 slug 进别名表，仍可访问）、可选 `base_revision`、可选 `comment`。**带 `base_revision` 时若期间有人保存过会返回 409**，不再静默覆盖 |
+| GET | `/api/wiki/page/{id}/revisions?page=&per_page=` | 公开* | 版本历史（倒序，仅元数据与正文长度，不含正文）。草稿仅作者/staff |
+| GET | `/api/wiki/page/{id}/revisions/{no}` | 公开* | 单个版本（含正文） |
+| POST | `/api/wiki/page/{id}/revert/{no}` | 作者/staff | `{base_revision?, comment?}`，把第 `no` 版作为**新版本**追加（不改写历史，因此可以再回滚回来） |
 | DELETE | `/api/wiki/page/{id}` | 作者/staff | 软删除 |
+
+### Wiki 版本与并发
+
+- 每次保存都会写入一条 `wiki_revisions` 快照，`wiki_pages.revision` 是权威计数
+  （创建即 1）。因此 `revision=N` 表示"第 N 次保存之后的状态"。
+- 并发用 **compare-and-set**：`UPDATE … WHERE id = ?1 AND revision = ?2`。
+  编辑器传 `base_revision` 时，落后于当前版本直接 409 并告知双方版本号；
+  不传时用读取到的版本兜底，仍能挡住"读到写之间被别人改掉"的竞态。
+- 回滚也是新增版本（注释默认 `revert to revision N`），历史永远线性可追。
+- 回收站**彻底删除**页面时，`wiki_revisions` 与 `wiki_slug_aliases` 通过
+  `ON DELETE CASCADE` 一并清掉（否则 purge 会被外键拒绝）。
 
 ## 回收站
 
