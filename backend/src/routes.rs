@@ -6,9 +6,15 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use sqlx::sqlite::SqlitePool;
+use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::SizeAbove;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
+
+/// Below this many bytes a response is sent as-is: gzipping a short JSON list
+/// costs more than it saves.
+const COMPRESSION_MIN_BYTES: u16 = 1024;
 
 use crate::config::Config;
 use crate::handlers::{admin, auth, comment, forum, project, rating, trash, wiki};
@@ -175,6 +181,15 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
     // `/assets/*` cache header and outside the concurrency limit.
     router
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
+        // Compress API responses on the fly — wiki pages and project READMEs are
+        // the payloads worth compressing. Static files already arrive encoded from
+        // their `.br`/`.gz` siblings, and the layer leaves anything that carries a
+        // `Content-Encoding` alone, so nothing is compressed twice. The size
+        // predicate keeps small JSON lists from paying for a gzip round trip.
+        .layer(
+            CompressionLayer::new()
+                .compress_when(SizeAbove::new(COMPRESSION_MIN_BYTES)),
+        )
         .layer(axum::middleware::from_fn(
             crate::middleware::security::security_headers,
         ))

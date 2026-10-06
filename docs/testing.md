@@ -15,7 +15,7 @@ cargo test --test project_test
 SQLite 用 `:memory:`，每个测试一份库。GitHub 请求通过 `GITHUB_API_BASE`
 指向 `wiremock` 起的 mock 服务器，不打真实 GitHub。
 
-测试文件与覆盖范围（当前共 134 条：`cargo test` 逐二进制计数）：
+测试文件与覆盖范围（当前共 138 条：`cargo test` 逐二进制计数）：
 
 | 文件 | 覆盖 |
 | --- | --- |
@@ -28,6 +28,7 @@ SQLite 用 `:memory:`，每个测试一份库。GitHub 请求通过 `GITHUB_API_
 | `tests/admin_test.rs` | 用户列表分页/搜索、改角色即时生效、refresh 不复活旧角色、封禁、统计计数 |
 | `tests/db_test.rs` | 迁移能跑完、表结构齐全、计数列已删除、回收站视图聚合五种 kind、测试库强制外键 |
 | `tests/static_files_test.rs` | SPA 深链回退、`/assets/*` immutable 缓存、安全头、JSON 404、预压缩件按 `Accept-Encoding` 送达 |
+| `tests/compression_test.rs` | 大 JSON 响应即时压缩并带 `Vary`、小响应不压、`identity` 客户端不压 |
 | `tests/health_test.rs` | `/api/health` 正常 200、数据库不可用时 503 |
 
 ## 2. 前端单元测试（Vitest）

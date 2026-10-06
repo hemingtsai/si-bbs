@@ -40,7 +40,7 @@ cd frontend && npm install && npm run dev
 ## 测试
 
 ```bash
-cd backend && cargo test          # 135 个后端测试
+cd backend && cargo test          # 138 个后端测试
 cd frontend && npm run test:unit  # 26 个前端单测
 cd frontend && npm run test:e2e   # Playwright 端到端（需先 test:e2e:install）
 ```

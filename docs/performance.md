@@ -39,9 +39,11 @@ ab -n 1000 -c 64 http://localhost:3001/api/health
    白名单。这是有意用一次索引查询换掉"旧 token 权限过期"这个安全问题，
    在 SQLite 上可忽略；早期版本只在角色端点上查库，代价是权限撤销有 15 分钟窗口。
 5. **Argon2 用 `spawn_blocking`**：哈希计算不阻塞 Tokio 线程，慢请求不波及健康检查。
-6. **静态资源预压缩**：前端构建时写出 `.br`/`.gz`，后端 `ServeDir` 显式开启
-   `precompressed_br()/precompressed_gzip()` 后直接按 `Accept-Encoding` 送预压缩件，
-   不在热路径上做压缩（并用 `Vary: accept-encoding` 告诉缓存两种编码不能混）。
+6. **静态资源预压缩 + 大响应即时压缩**：静态文件由前端构建写出 `.br`/`.gz`，
+   后端 `ServeDir` 显式开启 `precompressed_br()/precompressed_gzip()` 后直接按
+   `Accept-Encoding` 送预压缩件，热路径上不做静态压缩；API 的 JSON 响应则由
+   `CompressionLayer` 即时压缩，但只压 ≥1KB 的（`SizeAbove` 谓词），
+   带 `Content-Encoding` 的静态响应会被它自动跳过，不会二次压缩。
    实测 `vendor-*.js` 175.6KB → Brotli 58.7KB，`index-*.js` 11.6KB → Brotli 3.7KB。
    字体不参与预压缩：WOFF2 本身已是 Brotli、WOFF 已是 zlib，再压出来的 `.br`/`.gz`
    比原文件还大（6.07MB woff2 → 6.08MB .br + 6.08MB .gz），白白进了镜像。
