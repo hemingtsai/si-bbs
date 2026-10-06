@@ -156,6 +156,49 @@
 | PATCH | `/api/admin/users/{id}/ban` | `{banned: true|false}`，不可封禁自己或唯一的 admin |
 | GET | `/api/admin/stats` | `{users, users_banned, projects, projects_pending, projects_approved, wiki_published, comments, ratings, trashed}` |
 
+## 人机验证（工作量证明）
+
+自建方案：无第三方、无需密钥、不依赖外网、不改 CSP。它让**浏览器驱动的批量注册/
+发帖**必须为每次尝试付出真实 CPU，也让只会 POST 表单的脚本直接失效；但**挡不住**
+愿意跑原生或 GPU 求解器的攻击者（对他们每次尝试仍只是一次哈希）。这是"境内可达、
+零外部依赖"换来的代价，日后可叠加 Turnstile 之类的托管验证码。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/auth/challenge` | 公开。返回 `{challenge, difficulty, expires_in_secs, required}`。`challenge` 是用部署自己的 `JWT_SECRET` 签名的 JWT（`kind=pow`，含随机 nonce，5 分钟过期），**服务端不存储**，因此无法伪造、自带过期 |
+
+客户端拿到 `challenge` 后，找一个十进制 `answer` 使
+`sha256(nonce ‖ answer)` 的**前导零位数 ≥ difficulty**，然后把
+`{"challenge": "...", "answer": "..."}` 作为请求体的 `pow` 字段回传：
+
+```json
+{ "username": "alice", "email": "a@example.com", "password": "…",
+  "pow": { "challenge": "eyJ…", "answer": "84321" } }
+```
+
+要求验证的入口与时机：
+
+| 入口 | 何时要求 |
+| --- | --- |
+| `POST /api/auth/register` | 总是 |
+| `POST /api/auth/login` | **自适应**：同账号在当前窗口内失败达 3 次后才要求。正常登录仍是单次往返；成功登录后配额清零，验证随之消失 |
+| `POST /api/forum/posts`、`POST /api/forum/posts/{id}/comments` | 总是。**编辑**自己的帖子（`PATCH`）不需要——那不是垃圾信息面 |
+| `POST /api/auth/forgot` | 总是（保护日志与邮件通道） |
+
+失败响应带机器可读的 code，前端据此自动取新挑战并重试：
+
+```json
+{ "error": "human verification is required", "code": "pow" }
+```
+
+其它语义：**一次一用**（已解出的 nonce 记在内存，重复提交返回 `already been used`）；
+**错解不消耗挑战**（诚实客户端可继续提交正确解）；挑战 `exp` **无宽限**
+（会话 token 保留 60 秒时钟偏差容忍，挑战不保留）。
+
+配置：`POW_REQUIRED`（默认 **true**，纯 API 客户端可设 false）、`POW_DIFFICULTY`
+（默认 14 位 ≈ 1.6 万次哈希，上限 28 位钳制）。关掉时挑战端点仍可用但返回
+`required:false, difficulty:0`，前端只有一条代码路径。
+
 ## 会话：Bearer 头与 httpOnly cookie
 
 同一个接口支持两种认证来源，**`Authorization: Bearer` 优先**：

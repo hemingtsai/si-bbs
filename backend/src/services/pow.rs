@@ -90,6 +90,54 @@ impl Refused {
     }
 }
 
+/// Enforce the challenge for a request that always requires one.
+///
+/// Call this **before** any expensive work (hashing a password, hitting GitHub): the
+/// whole point is that unverified requests are cheap to refuse.
+pub fn enforce(
+    cfg: &Config,
+    store: &spent::Spent,
+    solution: Option<&Solution>,
+) -> Result<(), crate::error::AppError> {
+    if !cfg.pow_required {
+        return Ok(());
+    }
+    let solution = solution.ok_or_else(|| {
+        crate::error::AppError::Challenge("human verification is required".into())
+    })?;
+    verify(cfg, store, solution)
+        .map_err(|refused| crate::error::AppError::Challenge(refused.message().to_owned()))
+}
+
+/// Enforce the challenge only once an account has shown it is being guessed at.
+///
+/// An honest login never sees a challenge; an attacker working through a password
+/// list pays for one from the moment the budget gets tight. `attempts` is the number
+/// of failures already recorded for this account in the current window.
+pub fn enforce_adaptive(
+    cfg: &Config,
+    store: &spent::Spent,
+    solution: Option<&Solution>,
+    attempts: u32,
+) -> Result<(), crate::error::AppError> {
+    if !cfg.pow_required || attempts < LOGIN_CHALLENGE_AFTER {
+        return Ok(());
+    }
+    let solution = solution.ok_or_else(|| {
+        crate::error::AppError::Challenge(
+            "too many failed attempts; human verification is required".into(),
+        )
+    })?;
+    verify(cfg, store, solution)
+        .map_err(|refused| crate::error::AppError::Challenge(refused.message().to_owned()))
+}
+
+/// Failed logins for one account that switch the challenge on.
+///
+/// Low enough to catch a password list early, high enough that a person who mistypes
+/// their password twice is unaffected.
+pub const LOGIN_CHALLENGE_AFTER: u32 = 3;
+
 /// Signs a fresh challenge.
 pub fn issue(cfg: &Config, difficulty: u32) -> Result<Challenge, jsonwebtoken::errors::Error> {
     let difficulty = difficulty.clamp(1, MAX_DIFFICULTY);

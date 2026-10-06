@@ -14,6 +14,11 @@ pub enum AppError {
     TooManyRequests {
         retry_after_secs: u64,
     },
+    /// The proof-of-work challenge was missing, unsolved, expired or replayed.
+    ///
+    /// Rendered with `code: "pow"` so the frontend can tell "go and solve a new
+    /// challenge, then retry" apart from an ordinary validation failure.
+    Challenge(String),
     Internal(String),
 }
 
@@ -26,6 +31,7 @@ impl AppError {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::Challenge(_) => StatusCode::BAD_REQUEST,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -35,7 +41,7 @@ impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound => write!(f, "not found"),
-            Self::BadRequest(m) | Self::Conflict(m) => write!(f, "{m}"),
+            Self::BadRequest(m) | Self::Conflict(m) | Self::Challenge(m) => write!(f, "{m}"),
             Self::Unauthorized => write!(f, "unauthorized"),
             Self::Forbidden => write!(f, "forbidden"),
             Self::TooManyRequests { retry_after_secs } => {
@@ -69,6 +75,9 @@ impl IntoResponse for AppError {
             Self::TooManyRequests { retry_after_secs } => json!({
                 "error": format!("too many requests, retry in {retry_after_secs} seconds")
             }),
+            // The `code` is the contract with the frontend: it means "solve a fresh
+            // challenge and send this request again", not "your input was wrong".
+            Self::Challenge(m) => json!({ "error": m, "code": "pow" }),
         };
 
         let mut response = (status, Json(body)).into_response();

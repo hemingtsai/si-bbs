@@ -8,13 +8,34 @@ use crate::middleware::auth::require_auth;
 use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
-use crate::services::{cookies, password_reset, public_url, validate};
+use crate::services::{cookies, password_reset, pow, public_url, validate};
+
+/// Hand out a challenge. Public and unauthenticated: it is a signed nonce, not a
+/// session, and issuing one stores nothing (only *solved* nonces are remembered).
+///
+/// When the deployment has turned the challenge off this still answers, with
+/// `difficulty: 0`, so the frontend has one code path.
+pub async fn challenge(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let issued = pow::issue(&state.cfg, state.cfg.pow_difficulty)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "challenge": issued.challenge,
+        "difficulty": if state.cfg.pow_required { issued.difficulty } else { 0 },
+        "expires_in_secs": issued.expires_in_secs,
+        "required": state.cfg.pow_required,
+    })))
+}
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
     pub username: String,
     pub email: String,
     pub password: String,
+    /// Proof-of-work solution. Required when the deployment asks for it; the field is
+    /// optional here so the error message can say what is missing instead of the
+    /// extractor rejecting the body with a 422.
+    #[serde(default)]
+    pub pow: Option<pow::Solution>,
 }
 
 /// The register limiter is process-wide, so it needs a constant key.
@@ -25,6 +46,10 @@ pub async fn register(
     Json(body): Json<RegisterReq>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     // Shape checks first: they are free and must run before any hashing.
+    // Verify the work before anything expensive (Argon2, uniqueness checks): refusing
+    // an unverified request must be the cheapest thing this endpoint does.
+    pow::enforce(&state.cfg, &state.spent_challenges, body.pow.as_ref())?;
+
     let username = validate::username(&body.username).map_err(AppError::BadRequest)?;
     let email = validate::email(&body.email).map_err(AppError::BadRequest)?;
     validate::password(&body.password).map_err(AppError::BadRequest)?;
@@ -73,6 +98,10 @@ pub async fn register(
 pub struct LoginReq {
     pub username: String,
     pub password: String,
+    /// Only demanded once this account has failed a few times (see
+    /// `pow::enforce_adaptive`), so an ordinary login stays a single round trip.
+    #[serde(default)]
+    pub pow: Option<pow::Solution>,
 }
 
 pub async fn login(
@@ -84,6 +113,20 @@ pub async fn login(
     if let Some(retry_after_secs) = state.login_limiter.retry_after(&limit_key) {
         return Err(AppError::TooManyRequests { retry_after_secs });
     }
+
+    // Adaptive: only an account that has already failed a few times inside the window
+    // is asked to prove work. A password list therefore pays from the third try on,
+    // while a person who mistyped twice notices nothing.
+    //
+    // Reuses the bucket key above on purpose: shadowing it with a differently shaped
+    // key made `retry_after` and `record` consult two different buckets and silently
+    // disabled login rate limiting.
+    pow::enforce_adaptive(
+        &state.cfg,
+        &state.spent_challenges,
+        body.pow.as_ref(),
+        state.login_limiter.attempts(&limit_key),
+    )?;
 
     let row: Option<(i64, String, String, String, i64, i64)> = sqlx::query_as(
         "SELECT id, username, password_hash, role, banned, token_version \
@@ -492,6 +535,8 @@ async fn profile_of(state: &AppState, user_id: i64) -> Result<serde_json::Value,
 #[derive(Deserialize)]
 pub struct ForgotReq {
     pub email: String,
+    #[serde(default)]
+    pub pow: Option<pow::Solution>,
 }
 
 /// Request a password reset link.
@@ -511,6 +556,10 @@ pub async fn forgot_password(
             "status": "if the address exists, a reset link has been issued"
         })),
     );
+
+    // Before the limiter and the token work: an unverified request should cost
+    // nothing. The response stays generic either way, so this leaks nothing.
+    pow::enforce(&state.cfg, &state.spent_challenges, body.pow.as_ref())?;
 
     let email = body.email.trim().to_lowercase();
     if email.is_empty() {

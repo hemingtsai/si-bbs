@@ -113,11 +113,16 @@ pub struct PostInput {
     pub board: String,
     pub title: String,
     pub content: String,
+    /// Proof-of-work solution, checked by the handler before anything else.
+    #[serde(default)]
+    pub pow: Option<crate::services::pow::Solution>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommentInput {
     pub content: String,
+    #[serde(default)]
+    pub pow: Option<crate::services::pow::Solution>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

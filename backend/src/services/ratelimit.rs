@@ -81,6 +81,23 @@ impl RateLimiter {
         )
     }
 
+    /// Attempts recorded for `key` inside the current window.
+    ///
+    /// Used by the adaptive proof-of-work rule: an honest login must not pay for a
+    /// challenge, but an account that is being guessed at should.
+    pub fn attempts(&self, key: &str) -> u32 {
+        let now = Instant::now();
+        let mut buckets = self.lock();
+        match buckets.get_mut(key) {
+            Some(bucket) if bucket.reset_at > now => bucket.count,
+            Some(_) => {
+                buckets.remove(key);
+                0
+            }
+            None => 0,
+        }
+    }
+
     /// Count one attempt against `key`, starting a fresh window when the previous
     /// one has elapsed.
     pub fn record(&self, key: &str) {
@@ -114,6 +131,18 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attempts_reports_what_the_window_holds() {
+        let limiter = RateLimiter::new(5, Duration::from_secs(60));
+        assert_eq!(limiter.attempts("alice"), 0);
+        limiter.record("alice");
+        limiter.record("alice");
+        assert_eq!(limiter.attempts("alice"), 2);
+        assert_eq!(limiter.attempts("bob"), 0);
+        limiter.clear("alice");
+        assert_eq!(limiter.attempts("alice"), 0);
+    }
 
     #[test]
     fn budget_is_not_consumed_by_inspecting_it() {

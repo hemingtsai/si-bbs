@@ -11,7 +11,7 @@ use crate::models::forum::{
 use crate::models::page::Page;
 use crate::models::user::Role;
 use crate::routes::AppState;
-use crate::services::{audit, reports};
+use crate::services::{audit, pow, reports};
 
 const MAX_TITLE_LEN: usize = 200;
 const MAX_CONTENT_LEN: usize = 50_000;
@@ -149,6 +149,8 @@ pub async fn create_post(
     Json(input): Json<PostInput>,
 ) -> Result<(StatusCode, Json<ForumPostOut>), AppError> {
     let claims = require_auth(&state, &headers).await?;
+    // Posting is a spam surface, so this one always asks for the work.
+    pow::enforce(&state.cfg, &state.spent_challenges, input.pow.as_ref())?;
     let (board, title, content) = validate_post(&input)?;
 
     let res = sqlx::query(
@@ -320,6 +322,7 @@ pub async fn create_comment(
     Json(input): Json<CommentInput>,
 ) -> Result<(StatusCode, Json<ForumComment>), AppError> {
     let claims = require_auth(&state, &headers).await?;
+    pow::enforce(&state.cfg, &state.spent_challenges, input.pow.as_ref())?;
     let content = input.content.trim();
     if content.is_empty() {
         return Err(AppError::BadRequest("content is required".into()));
