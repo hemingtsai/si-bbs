@@ -1,6 +1,7 @@
 import { type APIRequestContext, expect, request, test } from '@playwright/test'
 
 import { promoteUser } from './support/db'
+import { solvePow } from './support/pow'
 
 /**
  * End-to-end coverage of the forum API through real HTTP.
@@ -37,14 +38,14 @@ async function api(): Promise<APIRequestContext> {
 
 async function register(ctx: APIRequestContext, username: string): Promise<void> {
   const res = await ctx.post('/api/auth/register', {
-    data: { username, email: `${username}@e2e.test`, password: PASSWORD },
+    data: { username, email: `${username}@e2e.test`, password: PASSWORD, pow: await solvePow(ctx) },
   })
   expect(res.status(), `register ${username}`).toBe(201)
 }
 
 async function login(ctx: APIRequestContext, username: string): Promise<string> {
   const res = await ctx.post('/api/auth/login', {
-    data: { username, password: PASSWORD },
+    data: { username, password: PASSWORD, pow: await solvePow(ctx) },
   })
   expect(res.status(), `login ${username}`).toBe(200)
   return (await res.json()).access_token
@@ -63,7 +64,7 @@ async function createPost(
   title: string,
 ): Promise<number> {
   const res = await ctx.post('/api/forum/posts', {
-    data: { board, title, content: '内容' },
+    data: { board, title, content: '内容', pow: await solvePow(ctx) },
     headers: auth,
   })
   expect(res.status()).toBe(201)
@@ -88,8 +89,9 @@ test('发帖与回帖不经审核即公开，点赞可切换', async () => {
     expect((await res.json()).likes_count).toBe(expected)
   }
 
+  // Proof of work is per request, replies included; see support/pow.ts.
   const reply = await alice.post(`/api/forum/posts/${postId}/comments`, {
-    data: { content: '沙发' },
+    data: { content: '沙发', pow: await solvePow(alice) },
     headers: auth,
   })
   expect(reply.status()).toBe(201)

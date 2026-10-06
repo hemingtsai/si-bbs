@@ -8,6 +8,8 @@ import MarkdownView from '../../components/MarkdownView.vue'
 import ReportButton from '../../components/ReportButton.vue'
 import { useAuthStore } from '../../stores/auth'
 import { apiError } from '../../lib/errors'
+import { withPow } from '../../lib/pow'
+import { useSolving } from '../../lib/usePow'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,7 @@ const moreCommentsError = ref('')
 const loading = ref(true)
 const error = ref('')
 const newComment = ref('')
+const solving = useSolving()
 const commentError = ref('')
 
 const postId = computed(() => Number(route.params.id))
@@ -97,7 +100,7 @@ async function submitComment(): Promise<void> {
     return
   }
   try {
-    const { data } = await forumApi.createComment(postId.value, content)
+    const { data } = await withPow((pow) => forumApi.createComment(postId.value, content, pow))
     comments.value.push(data)
     commentsTotal.value += 1
     newComment.value = ''
@@ -202,7 +205,7 @@ onMounted(load)
       <form v-if="auth.isAuthenticated" class="form-stack" style="margin-top: 12px" @submit.prevent="submitComment">
         <textarea v-model="newComment" rows="3" placeholder="写下你的回复" maxlength="50000"></textarea>
         <div class="row gap">
-          <button type="submit" class="btn">回复</button>
+          <button type="submit" class="btn">{{ solving ? '验证中…' : '回复' }}</button>
         </div>
       </form>
       <p v-else class="meta"><RouterLink to="/login">登录</RouterLink>后才能回复。</p>

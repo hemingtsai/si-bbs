@@ -1,6 +1,7 @@
 import { expect, request, test, type Page } from '@playwright/test'
 
 import { promoteUser } from './support/db'
+import { solvePow } from './support/pow'
 
 /**
  * Browser-level coverage of the account self-service page.
@@ -173,7 +174,7 @@ test('陈旧编辑被拒绝并保留输入，而不是静默覆盖', async ({ pa
   // Somebody else (or another tab) saves first.
   const ctx = await request.newContext({ baseURL: API })
   const login = await ctx.post('/api/auth/login', {
-    data: { username: author, password: PASSWORD },
+    data: { username: author, password: PASSWORD, pow: await solvePow(ctx) },
   })
   const { access_token: token } = (await login.json()) as { access_token: string }
   const detail = await ctx.get(`/api/wiki/conflict-${RUN}`)
@@ -393,13 +394,13 @@ test('长回复串分页加载，而不是永远只显示第一页', async ({ pa
   // 25 replies through the API: past the 20-per-page the UI asks for.
   const ctx = await request.newContext({ baseURL: API })
   const login = await ctx.post('/api/auth/login', {
-    data: { username: author, password: PASSWORD },
+    data: { username: author, password: PASSWORD, pow: await solvePow(ctx) },
   })
   const { access_token: token } = (await login.json()) as { access_token: string }
   for (let i = 1; i <= 25; i += 1) {
     const res = await ctx.post(`/api/forum/posts/${postId}/comments`, {
       headers: { Authorization: `Bearer ${token}` },
-      data: { content: `第 ${i} 条回复` },
+      data: { content: `第 ${i} 条回复`, pow: await solvePow(ctx) },
     })
     expect(res.status()).toBe(201)
   }
@@ -484,7 +485,9 @@ test('会话只在 httpOnly cookie 里，跨站写请求被 CSRF 层拒绝', asy
 
   // …and accepted once the client echoes the cookie, which is what the app does for
   // every unsafe request.
-  const withHeader = await page.evaluate(async () => {
+  // The header is necessary but no longer sufficient: posting also has to prove work.
+  const proof = await powInPage(page)
+  const withHeader = await page.evaluate(async (pow) => {
     const token = document.cookie
       .split(';')
       .map((c) => c.trim())
@@ -494,10 +497,15 @@ test('会话只在 httpOnly cookie 里，跨站写请求被 CSRF 层拒绝', asy
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
       credentials: 'include',
-      body: JSON.stringify({ board: 'life', title: `带 CSRF 头 ${Date.now()}`, content: '正文' }),
+      body: JSON.stringify({
+        board: 'life',
+        title: `带 CSRF 头 ${Date.now()}`,
+        content: '正文',
+        pow,
+      }),
     })
     return res.status
-  })
+  }, proof)
   expect(withHeader).toBe(201)
 
   // 4) Logging out ends the session server-side: a protected route bounces again.
@@ -505,4 +513,111 @@ test('会话只在 httpOnly cookie 里，跨站写请求被 CSRF 层拒绝', asy
   await page.getByRole('button', { name: '退出' }).click()
   await page.goto('/settings')
   await expect(page).toHaveURL(/\/login\?redirect=/)
+})
+
+/**
+ * Solve a challenge from inside the page, for tests that bypass the app's own client
+ * and call `fetch` directly. Deliberately a separate implementation: if this and
+ * `src/lib/pow.ts` ever disagree about how the digest is counted, the server refuses
+ * both and the test says so.
+ */
+async function powInPage(page: Page): Promise<{ challenge: string; answer: string } | undefined> {
+  return page.evaluate(async () => {
+    const res = await fetch('/api/auth/challenge', { credentials: 'include' })
+    const body = (await res.json()) as {
+      challenge: string
+      difficulty: number
+      required: boolean
+    }
+    if (!body.required || body.difficulty === 0) return undefined
+
+    const payload = body.challenge.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const nonce = JSON.parse(atob(payload + '='.repeat((4 - (payload.length % 4)) % 4)))
+      .nonce as string
+
+    const encoder = new TextEncoder()
+    for (let counter = 0; ; counter += 1) {
+      const answer = String(counter)
+      const digest = await crypto.subtle.digest('SHA-256', encoder.encode(nonce + answer))
+      let bits = 0
+      for (const byte of new Uint8Array(digest)) {
+        if (byte === 0) {
+          bits += 8
+          continue
+        }
+        bits += Math.clz32(byte) - 24
+        break
+      }
+      if (bits >= body.difficulty) return { challenge: body.challenge, answer }
+    }
+  })
+}
+
+/**
+ * Human verification, end to end.
+ *
+ * The browser has to fetch a challenge, do the work and get the form through — with
+ * the production difficulty, so this also measures what a real user waits for.
+ */
+test('注册与发帖会先在浏览器里完成人机验证', async ({ page }) => {
+  const user = `upw_${RUN}`
+
+  // Time the challenge round trip plus the solve: that is the user-visible cost.
+  const started = Date.now()
+  await registerAndLogin(page, user)
+  const registerMs = Date.now() - started
+
+  // The shell shows the name, so the session really was established through login,
+  // which itself had to pass verification.
+  await expect(page.locator('.sidebar')).toContainText(user)
+
+  // Posting needs its own solution.
+  const postStarted = Date.now()
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`验证后发帖_${RUN}`)
+  await page.getByLabel('正文').fill('正文')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page).toHaveURL(/\/forum\/\d+$/)
+  const postMs = Date.now() - postStarted
+
+  // A failing challenge would leave the form on the page with an error; reaching the
+  // post proves the proof was accepted. Record the timings so a regression in cost is
+  // visible in the report rather than discovered by users.
+  console.log(`[pow] 注册+登录含求解 ${registerMs}ms，发帖含求解 ${postMs}ms`)
+  expect(registerMs).toBeLessThan(60_000)
+  expect(postMs).toBeLessThan(15_000)
+})
+
+test('挑战被拒时会自动换一个重试，用户不需要重开页面', async ({ page }) => {
+  const user = `upw2_${RUN}`
+  await registerAndLogin(page, user)
+
+  // Make the first challenge submitted unusable, the way expiry or a replay would.
+  // The frontend is supposed to notice `code: "pow"`, fetch a fresh challenge, solve
+  // it and retry — so the user still gets their post.
+  let tampered = false
+  await page.route('**/api/auth/challenge', async (route) => {
+    const response = await route.fetch()
+    const body = (await response.json()) as { challenge: string; difficulty: number; required: boolean }
+    // Only the first one: the retry must be served a usable challenge, otherwise the
+    // test would be asserting that a permanently broken server still works.
+    if (!body.required || tampered) {
+      await route.fulfill({ response })
+      return
+    }
+    tampered = true
+    // Replace the challenge with one signed for a *different* nonce: the server will
+    // refuse the answer even though it is a valid solution to what we hashed.
+    await route.fulfill({
+      response,
+      json: { ...body, challenge: `${body.challenge.split('.').slice(0, 2).join('.')}.tampered` },
+    })
+  })
+
+  await page.goto('/forum/new')
+  await page.getByLabel('标题').fill(`挑战被拒_${RUN}`)
+  await page.getByLabel('正文').fill('正文')
+  await page.getByRole('button', { name: '发送' }).click()
+
+  await expect(page).toHaveURL(/\/forum\/\d+$/, { timeout: 20_000 })
 })

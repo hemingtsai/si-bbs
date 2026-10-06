@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { clearProfileCache, clearSession } from '../api/axios'
 import { authApi } from '../api'
+import { withPow } from '../lib/pow'
 import { SESSION_CLEARED_EVENT } from '../lib/session'
 import type { AuthTokens, Me, ProfileInput, Role } from '../api/types'
 
@@ -111,7 +112,7 @@ export const useAuthStore = defineStore('auth', () => {
     email: string
     password: string
   }): Promise<void> {
-    await authApi.register(payload)
+    await withPow((pow) => authApi.register({ ...payload, pow }))
   }
 
   async function fetchMe(): Promise<Me> {

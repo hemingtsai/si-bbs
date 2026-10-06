@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../../stores/auth'
+import { useSolving } from '../../lib/usePow'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -12,6 +13,7 @@ const username = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+const solving = useSolving()
 
 async function submit(): Promise<void> {
   error.value = ''
@@ -51,7 +53,7 @@ async function submit(): Promise<void> {
       <p v-if="error" class="error">{{ error }}</p>
       <div class="row gap">
         <button class="btn btn-primary" type="submit" :disabled="busy">
-          {{ busy ? '登录中…' : '登录' }}
+          {{ solving ? '验证中…' : busy ? '登录中…' : '登录' }}
         </button>
         <RouterLink to="/register" class="btn">注册新账号</RouterLink>
       </div>

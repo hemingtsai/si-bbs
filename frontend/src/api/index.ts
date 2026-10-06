@@ -1,4 +1,5 @@
 import { api } from './axios'
+import type { Solution } from '../lib/pow'
 import type {
   AdminReport,
   AdminUser,
@@ -127,10 +128,17 @@ export const authApi = {
   /// Everything about the caller, including the profile fields. `me` is the same
   /// endpoint family; this one carries the extra columns the settings page needs.
   profile: () => api.get<Me>('/auth/profile'),
-  login: (payload: { username: string; password: string }) =>
+  login: (payload: { username: string; password: string; pow?: Solution }) =>
     api.post<AuthTokens>('/auth/login', payload),
-  register: (payload: { username: string; email: string; password: string }) =>
+  register: (payload: { username: string; email: string; password: string; pow?: Solution }) =>
     api.post<{ role: Role }>('/auth/register', payload),
+  /// Ask for a challenge. Public; used by `lib/pow.ts`.
+  challenge: () =>
+    api.get<{ challenge: string; difficulty: number; expires_in_secs: number; required: boolean }>(
+      '/auth/challenge',
+    ),
+  forgot: (payload: { email: string; pow?: Solution }) =>
+    api.post<{ status: string }>('/auth/forgot', payload),
   updateProfile: (payload: ProfileInput) => api.patch<Me>('/auth/profile', payload),
   /// Returns a fresh token pair: the server invalidates every earlier token.
   changePassword: (payload: { current_password: string; new_password: string }) =>
@@ -147,7 +155,7 @@ export const forumApi = {
   list: (params?: { board?: string; q?: string; page?: number; per_page?: number }) =>
     api.get<Page<ForumPostSummary>>('/forum/posts', { params }),
   detail: (id: number) => api.get<ForumPost>(`/forum/posts/${id}`),
-  create: (payload: { board: ForumBoard; title: string; content: string }) =>
+  create: (payload: { board: ForumBoard; title: string; content: string; pow?: Solution }) =>
     api.post<ForumPost>('/forum/posts', payload),
   update: (id: number, payload: { board: ForumBoard; title: string; content: string }) =>
     api.patch<ForumPost>(`/forum/posts/${id}`, payload),
@@ -157,8 +165,8 @@ export const forumApi = {
     api.patch<ForumPost>(`/forum/posts/${id}/featured`, { featured }),
   comments: (id: number, params?: { page?: number; per_page?: number }) =>
     api.get<Page<ForumComment>>(`/forum/posts/${id}/comments`, { params }),
-  createComment: (id: number, content: string) =>
-    api.post<ForumComment>(`/forum/posts/${id}/comments`, { content }),
+  createComment: (id: number, content: string, pow?: Solution) =>
+    api.post<ForumComment>(`/forum/posts/${id}/comments`, { content, pow }),
   deleteComment: (commentId: number) => api.delete<void>(`/forum/comments/${commentId}`),
   likeComment: (commentId: number) =>
     api.post<{ liked: boolean; likes_count: number }>(`/forum/comments/${commentId}/like`),

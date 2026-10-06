@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import { forumApi } from '../../api'
 import type { ForumBoard } from '../../api/types'
 import { apiError } from '../../lib/errors'
+import { withPow } from '../../lib/pow'
+import { useSolving } from '../../lib/usePow'
 import AttachmentUpload from '../../components/AttachmentUpload.vue'
 
 const router = useRouter()
@@ -14,6 +16,7 @@ const title = ref('')
 const content = ref('')
 const error = ref('')
 const busy = ref(false)
+const solving = useSolving()
 const contentEl = ref<HTMLTextAreaElement | null>(null)
 
 /// Insert an attachment at the caret instead of appending to the end.
@@ -40,11 +43,14 @@ async function submit(): Promise<void> {
   }
   busy.value = true
   try {
-    const { data } = await forumApi.create({
-      board: board.value,
-      title: title.value.trim(),
-      content: content.value,
-    })
+    const { data } = await withPow((pow) =>
+      forumApi.create({
+        board: board.value,
+        title: title.value.trim(),
+        content: content.value,
+        pow,
+      }),
+    )
     router.push({ name: 'forum-detail', params: { id: data.id } })
   } catch (err: unknown) {
     error.value = apiError(err, '发帖失败')
@@ -80,7 +86,7 @@ async function submit(): Promise<void> {
       <AttachmentUpload input-id="forum-attachment" @insert="insertIntoContent" />
       <p v-if="error" class="error">{{ error }}</p>
       <div class="row gap">
-        <button type="submit" class="btn btn-primary" :disabled="busy">{{ busy ? '发送中…' : '发送' }}</button>
+        <button type="submit" class="btn btn-primary" :disabled="busy">{{ solving ? '验证中…' : busy ? '发送中…' : '发送' }}</button>
         <button type="button" class="btn" @click="router.back()">取消</button>
       </div>
     </form>

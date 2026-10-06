@@ -27,6 +27,10 @@ const BACKEND_ENV = {
   // Keep test uploads inside the scratch directory: the default (`./uploads`) put
   // them in the repository root, where they showed up as untracked files.
   UPLOAD_DIR: E2E_UPLOAD_DIR,
+  // Turn human verification on so the browser flows exercise the real solver, and
+  // keep the production difficulty: the suite then measures what a user actually
+  // waits for instead of a number nobody runs.
+  POW_REQUIRED: 'true',
 }
 const CI = !!process.env.CI
 const WEB_SERVER = {

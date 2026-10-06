@@ -1,6 +1,7 @@
 import { type APIRequestContext, expect, request, test, type Page } from '@playwright/test'
 
 import { promoteUser } from './support/db'
+import { solvePow } from './support/pow'
 
 /**
  * Browser-level coverage of the forum.
@@ -56,7 +57,7 @@ async function createPostViaApi(
   const ctx = await api()
   try {
     const res = await ctx.post('/api/forum/posts', {
-      data: { board, title, content: '正文' },
+      data: { board, title, content: '正文', pow: await solvePow(ctx) },
       headers: { Authorization: `Bearer ${token}` },
     })
     expect(res.status()).toBe(201)
@@ -70,7 +71,7 @@ async function apiToken(username: string): Promise<string> {
   const ctx = await api()
   try {
     const res = await ctx.post('/api/auth/login', {
-      data: { username, password: PASSWORD },
+      data: { username, password: PASSWORD, pow: await solvePow(ctx) },
     })
     if (res.status() !== 200) {
       throw new Error(`login for ${username} failed: ${res.status()} ${await res.text()}`)
