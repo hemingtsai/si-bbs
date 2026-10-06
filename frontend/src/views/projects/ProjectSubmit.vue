@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { projectsApi } from '../../api'
 import { apiError } from '../../lib/errors'
+import { PROJECT_CATEGORIES } from '../../lib/categories'
 
 const router = useRouter()
 
@@ -47,7 +48,10 @@ async function submit(): Promise<void> {
       </label>
       <label class="field">
         <span class="field-label">分类</span>
-        <input v-model="category" type="text" required placeholder="例如 dev-tools" />
+        <select v-model="category" required>
+          <option value="" disabled>请选择分类</option>
+          <option v-for="c in PROJECT_CATEGORIES" :key="c" :value="c">{{ c }}</option>
+        </select>
       </label>
       <label class="field">
         <span class="field-label">一句话描述（可选，缺省取 GitHub 简介）</span>

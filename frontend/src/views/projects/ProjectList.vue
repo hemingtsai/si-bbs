@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 
 import { projectsApi } from '../../api'
 import type { Project } from '../../api/types'
+import { PROJECT_CATEGORIES } from '../../lib/categories'
 
 const projects = ref<Project[]>([])
 const total = ref(0)
@@ -66,7 +67,10 @@ onMounted(load)
       </label>
       <label class="field">
         <span class="field-label">分类</span>
-        <input v-model="filters.category" type="text" placeholder="例如 dev-tools" />
+        <select v-model="filters.category" @change="refine">
+          <option value="">全部</option>
+          <option v-for="c in PROJECT_CATEGORIES" :key="c" :value="c">{{ c }}</option>
+        </select>
       </label>
       <label class="field">
         <span class="field-label">排序</span>
