@@ -49,7 +49,7 @@ pub fn server_with_static(pool: SqlitePool, static_dir: Option<String>) -> TestS
     TestServer::new(create_router_with_static(state, static_dir))
 }
 
-fn test_config(github_api_base: &str) -> Config {
+pub fn test_config(github_api_base: &str) -> Config {
     Config {
         database_url: "sqlite::memory:".into(),
         jwt_secret: "test-secret".into(),
@@ -57,6 +57,7 @@ fn test_config(github_api_base: &str) -> Config {
         refresh_ttl_secs: 7 * 24 * 3600,
         github_token: String::new(),
         github_api_base: github_api_base.to_string(),
+        public_base_url: String::new(),
     }
 }
 

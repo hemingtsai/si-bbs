@@ -17,7 +17,7 @@ use tracing::Level;
 const COMPRESSION_MIN_BYTES: u16 = 1024;
 
 use crate::config::Config;
-use crate::handlers::{admin, auth, comment, forum, project, rating, trash, wiki};
+use crate::handlers::{admin, auth, comment, feed, forum, project, rating, trash, wiki};
 use crate::services::ratelimit::{self, RateLimiter};
 
 #[derive(Clone)]
@@ -127,6 +127,11 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
             "/api/forum/rules/{board}",
             axum::routing::put(forum::upsert_rule),
         )
+        // Feeds (public, unauthenticated by design: a reader sends no auth header).
+        .route("/feed.xml", get(feed::site))
+        .route("/forum/feed.xml", get(feed::forum))
+        .route("/wiki/feed.xml", get(feed::wiki))
+        .route("/projects/feed.xml", get(feed::projects))
         // Administration.
         .route("/api/admin/users", get(admin::list_users))
         .route(

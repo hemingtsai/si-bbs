@@ -128,6 +128,34 @@
 | PATCH | `/api/admin/users/{id}/ban` | `{banned: true|false}`，不可封禁自己或唯一的 admin |
 | GET | `/api/admin/stats` | `{users, users_banned, projects, projects_pending, projects_approved, wiki_published, comments, ratings, trashed}` |
 
+## 订阅（RSS）
+
+公开、无需认证——feed 阅读器不会带 `Authorization`。每个源最多 30 条，
+正文只放 600 字摘要（wiki 正文可达 20 万字符，整篇塞进 feed 没有意义）。
+
+| 路径 | 内容 |
+| --- | --- |
+| `GET /feed.xml` | 全站：论坛新帖 + Wiki 变更，按时间倒序混合 |
+| `GET /forum/feed.xml[?board=models\|tools\|life]` | 论坛新帖，可按板块过滤 |
+| `GET /wiki/feed.xml` | 已发布 Wiki 页面的最近变更 |
+| `GET /projects/feed.xml` | 新收录（approved）的项目 |
+
+要点：
+
+- `Content-Type: application/rss+xml; charset=utf-8`，RSS 2.0，带
+  `<atom:link rel="self">`。带 `?board=` 非法值返回 400。
+- 链接是**绝对地址**：优先用 `PUBLIC_BASE_URL`（生产建议设成
+  `https://sibbs.cn`），否则按 `X-Forwarded-Proto` + `Host` 推导，
+  因此反向代理下也能给出正确链接。
+- 输出前会做 XML 转义，并丢弃 XML 1.0 无法表示的控制字符
+  （一个 `\u{1}` 就能让整个 feed 无法解析）。
+- 只包含公开可见内容：软删除的帖子、草稿 wiki、待审项目都不会出现。
+- SPA 的 `index.html` 里带了 `<link rel="alternate" type="application/rss+xml">`
+  自动发现声明，侧栏也有 RSS 入口。
+- **反向代理必须把这些路径转给后端**：它们不是磁盘上的文件。
+  `deploy/Caddyfile` 与 `nginx/si-bbs.conf` 都已包含
+  （Caddy 用 `@backend path /api/* /feed.xml …`，nginx 用一条正则 location）。
+
 ## 错误码
 
 | 码 | 含义 |

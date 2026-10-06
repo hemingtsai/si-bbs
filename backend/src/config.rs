@@ -17,6 +17,9 @@ pub struct Config {
     pub refresh_ttl_secs: i64,
     pub github_token: String,
     pub github_api_base: String,
+    /// Absolute public origin used to build links inside RSS feeds, e.g.
+    /// `https://sibbs.cn`. Empty means "derive it from the proxy headers".
+    pub public_base_url: String,
 }
 
 /// Decide which JWT secret the process is allowed to run with.
@@ -90,6 +93,7 @@ impl Config {
             github_token: env::var("GITHUB_TOKEN").unwrap_or_default(),
             github_api_base: env::var("GITHUB_API_BASE")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
+            public_base_url: env::var("PUBLIC_BASE_URL").unwrap_or_default(),
         })
     }
 }

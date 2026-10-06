@@ -23,7 +23,11 @@ sibbs.cn, www.sibbs.cn {
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
 	}
 
-	handle /api/* {
+	# The feed paths are served by the backend (they are generated, not static
+	# files), so they must be proxied just like /api/*. `handle` takes a single
+	# matcher, hence the named one.
+	@backend path /api/* /feed.xml /forum/feed.xml /wiki/feed.xml /projects/feed.xml
+	handle @backend {
 		reverse_proxy 127.0.0.1:3000
 	}
 

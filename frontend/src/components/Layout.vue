@@ -57,6 +57,7 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">
         <span class="user">{{ auth.username ?? '未登录' }}</span>
+        <a class="linklike" href="/feed.xml">RSS</a>
         <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
         <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
       </div>
@@ -68,7 +69,8 @@ const themeLabel = () => (themePref.value === 'system' ? '跟随系统' : themeP
           <!-- Only visible on <= 768px via .mobile-nav-only -->
           <div class="mobile-nav-only">
             <span class="user">{{ auth.username ?? '未登录' }}</span>
-            <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
+            <a class="linklike" href="/feed.xml">RSS</a>
+        <button class="linklike" @click="cycleTheme">{{ themeLabel() }}</button>
             <button v-if="auth.isAuthenticated" class="linklike" @click="logout">退出</button>
           </div>
         </div>

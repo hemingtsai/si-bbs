@@ -817,6 +817,7 @@ async fn github_token_is_sent_when_configured() {
         refresh_ttl_secs: 7 * 24 * 3600,
         github_token: "test-token".into(),
         github_api_base: gh.uri(),
+        public_base_url: String::new(),
     };
     let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState::new(pool, cfg));
     let server = TestServer::new(app);
