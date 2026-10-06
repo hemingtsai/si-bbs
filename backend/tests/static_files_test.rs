@@ -78,3 +78,56 @@ async fn without_a_static_directory_the_api_still_works() {
     // No fallback is registered, so this is a bare 404 rather than the shell.
     server.get("/forum/42").await.assert_status(StatusCode::NOT_FOUND);
 }
+
+/// The build copies `.br`/`.gz` siblings next to every compressible artifact;
+/// they were dead weight in the image until `ServeDir` was told about them.
+#[tokio::test]
+async fn precompressed_siblings_are_served_when_the_client_asks_for_them() {
+    let dir = static_dir();
+    fs::write(
+        dir.path().join("assets/app-abc123.js.br"),
+        "brotli-encoded-body",
+    )
+    .expect("write brotli sibling");
+
+    let pool = common::test_pool().await;
+    let server = common::server_with_static(pool, Some(dir.path().to_string_lossy().into_owned()));
+
+    let res = server
+        .get("/assets/app-abc123.js")
+        .add_header("accept-encoding", "br")
+        .await;
+    res.assert_status_ok();
+    assert_eq!(
+        res.headers().get("content-encoding").and_then(|v| v.to_str().ok()),
+        Some("br")
+    );
+    // A cache must keep the two encodings apart.
+    assert!(
+        res.headers()
+            .get("vary")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.contains("accept-encoding")),
+        "missing Vary: accept-encoding"
+    );
+    assert_eq!(res.text(), "brotli-encoded-body");
+}
+
+/// A client that does not accept Brotli must keep getting the plain file.
+#[tokio::test]
+async fn a_client_without_brotli_support_gets_the_original_file() {
+    let dir = static_dir();
+    fs::write(dir.path().join("assets/app-abc123.js.br"), "brotli-encoded-body")
+        .expect("write brotli sibling");
+
+    let pool = common::test_pool().await;
+    let server = common::server_with_static(pool, Some(dir.path().to_string_lossy().into_owned()));
+
+    let res = server
+        .get("/assets/app-abc123.js")
+        .add_header("accept-encoding", "identity")
+        .await;
+    res.assert_status_ok();
+    assert!(res.headers().get("content-encoding").is_none());
+    assert_eq!(res.text(), "console.log(1)");
+}

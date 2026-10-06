@@ -31,10 +31,15 @@ ab -n 1000 -c 64 http://localhost:3001/api/health
 4. **JWT 校验无库查询**：`require_auth` 纯验签名；只有 `require_role` 做了一次
    主键查询（见架构文档的权限决策）。
 5. **Argon2 用 `spawn_blocking`**：哈希计算不阻塞 Tokio 线程，慢请求不波及健康检查。
-6. **静态资源预压缩**：前端构建时写出 `.br`/`.gz`，后端直接 `send_file`，
-   不在热路径上做压缩。`vendor.js` 原始 88KB → Brotli 30KB。
-7. **前端手动分包**：`marked`/`highlight.js` 单独成块（192KB → gzip 64KB），
-   首屏只拉 `index` chunk（9.3KB → gzip 3.5KB）。
+6. **静态资源预压缩**：前端构建时写出 `.br`/`.gz`，后端 `ServeDir` 显式开启
+   `precompressed_br()/precompressed_gzip()` 后直接按 `Accept-Encoding` 送预压缩件，
+   不在热路径上做压缩（并用 `Vary: accept-encoding` 告诉缓存两种编码不能混）。
+   实测 `vendor-*.js` 175.6KB → Brotli 58.7KB，`index-*.js` 11.6KB → Brotli 3.7KB。
+   字体不参与预压缩：WOFF2 本身已是 Brotli、WOFF 已是 zlib，再压出来的 `.br`/`.gz`
+   比原文件还大（6.07MB woff2 → 6.08MB .br + 6.08MB .gz），白白进了镜像。
+7. **前端手动分包**：`marked`/`highlight.js` 单独成块（192.7KB → Brotli 47.8KB），
+   首屏拉 `index`（11.6KB → Brotli 3.7KB）+ `vendor`（175.6KB → Brotli 58.7KB）
+   + 两份 CSS（110.8KB → Brotli 23.7KB）。
 
 ## 已知的瓶颈与对策
 
@@ -61,6 +66,8 @@ BASE=http://localhost:3001 k6 run deploy/k6.js
 
 ## 二进制体积
 
-发布镜像约 41MB（Alpine 3.21 + 8MB musl 静态二进制 + 前端 dist）。
+镜像 = Alpine 3.21 + 约 7.6MB musl 静态二进制 + 前端 `dist`。`dist` 目前是
+**7.2MB**（此前 19MB：其中约 12MB 是对字体做无效预压缩产生的 `.br`/`.gz`，
+已通过把 `woff2?` 排除出预压缩列表去掉），所以镜像比原先的 41MB 小约 12MB。
 如需进一步缩小：把 SQLite 换成 LiteFS 之类无需变更；前端只用最常用的
 页面路由做预渲染也能再省首屏体积。

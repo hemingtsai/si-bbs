@@ -138,7 +138,18 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
     if let Some(dir) = dir {
         let index = std::path::Path::new(&dir).join("index.html");
         if index.exists() {
-            let static_files = ServeDir::new(&dir).fallback(ServeFile::new(&index));
+            // The Vite build writes `.br`/`.gz` siblings for every compressible
+            // artifact. Without `precompressed_*` these calls a plain `ServeDir`
+            // ignores the siblings entirely: they were shipped inside the image
+            // and never served, while the client received uncompressed bytes.
+            let static_files = ServeDir::new(&dir)
+                .precompressed_br()
+                .precompressed_gzip()
+                .fallback(
+                    ServeFile::new(&index)
+                        .precompressed_br()
+                        .precompressed_gzip(),
+                );
             router = router.fallback(move |req: axum::extract::Request| {
                 let mut service = static_files.clone();
                 async move {

@@ -35,5 +35,14 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
         h.insert("cache-control", HeaderValue::from_static("no-cache"));
     }
 
+    // A static response may come from the `.br`/`.gz` sibling depending on the
+    // request's `Accept-Encoding` — tower-http picks the variant but does not
+    // advertise that the representation varies, so a shared cache could hand a
+    // Brotli body to a client that cannot decode it. API responses are built per
+    // request and never encoded, so they do not need this.
+    if !path.starts_with("/api/") {
+        h.insert("vary", HeaderValue::from_static("accept-encoding"));
+    }
+
     res
 }

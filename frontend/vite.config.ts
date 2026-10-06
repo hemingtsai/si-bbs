@@ -16,7 +16,11 @@ const rootDir = fileURLToPath(new URL('.', import.meta.url))
 const outDir = join(rootDir, 'dist')
 const assetsDir = join(outDir, 'assets')
 
-const COMPRESSIBLE = /\.(js|css|html|svg|json|woff2?)$/
+// Fonts are deliberately absent: WOFF2 is Brotli-compressed inside the file and
+// WOFF is zlib-compressed, so re-compressing them produced `.br`/`.gz` siblings
+// that were *larger* than the originals (measured: 6.07 MB of woff2 became
+// 6.08 MB of .br plus 6.08 MB of .gz) and rode along into the runtime image.
+const COMPRESSIBLE = /\.(js|css|html|svg|json)$/
 const ALREADY_COMPRESSED = /\.(br|gz)$/
 const MIN_COMPRESS_BYTES = 512
 const BROTLI_QUALITY = 11

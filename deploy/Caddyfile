@@ -2,19 +2,47 @@
 	email hemingtsai@hotmail.com
 }
 
-# Production site. The backend binary listens on 127.0.0.1:3000 and handles
-# API + (optionally) static files; Caddy terminates TLS, serves the built SPA
-# from /srv/si-bbs/dist and proxies /api/* to the backend.
+# Production site. The backend binary listens on 127.0.0.1:3000 and handles the
+# API; Caddy terminates TLS, serves the built SPA from /srv/si-bbs/dist and
+# proxies /api/* to the backend.
+#
+# Static files are served by Caddy here, so the headers the binary sets for the
+# all-in-one deployment have to be repeated at this layer. HSTS deliberately
+# omits `includeSubDomains`: add it only once every subdomain is HTTPS.
 sibbs.cn, www.sibbs.cn {
 	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+	}
 
 	handle /api/* {
 		reverse_proxy 127.0.0.1:3000
 	}
 
+	# Content-hashed bundles: same name never means different bytes.
+	handle /assets/* {
+		root * /srv/si-bbs/dist
+		header Cache-Control "public, max-age=31536000, immutable"
+		header Vary "accept-encoding"
+		# Without this the .br/.gz siblings written by the Vite build are ignored.
+		file_server {
+			precompressed br gzip
+		}
+	}
+
 	handle {
 		root * /srv/si-bbs/dist
 		try_files {path} /index.html
-		file_server
+		# index.html must not be cached, or a deploy would never be picked up.
+		header Cache-Control "no-cache"
+		header Vary "accept-encoding"
+		file_server {
+			precompressed br gzip
+		}
 	}
 }
