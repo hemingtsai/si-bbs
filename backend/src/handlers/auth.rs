@@ -8,7 +8,7 @@ use crate::middleware::auth::require_auth;
 use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
-use crate::services::{cookies, password_reset, validate};
+use crate::services::{cookies, password_reset, public_url, validate};
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
@@ -502,6 +502,7 @@ pub struct ForgotReq {
 /// is written to the server log, which is why the response never contains it.
 pub async fn forgot_password(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<ForgotReq>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let generic = (
@@ -545,12 +546,18 @@ pub async fn forgot_password(
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let base = crate::services::feed::base_url(&state.cfg.public_base_url, None, None);
+    // Built from the request's forwarded scheme/host: the binary listens on loopback,
+    // so its own address is not one a user can open.
+    let link = public_url::absolute(
+        &state.cfg.public_base_url,
+        &headers,
+        &format!("/reset?token={token}"),
+    );
     // Loud on purpose: with no mailer configured this log line *is* the delivery
     // channel, and docs/deployment.md says so.
     tracing::warn!(
         user_id,
-        "password reset link (no mailer configured): {base}/reset?token={token}"
+        "password reset link (no mailer configured): {link}"
     );
 
     Ok(generic)

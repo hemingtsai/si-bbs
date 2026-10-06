@@ -14,6 +14,7 @@ use crate::error::AppError;
 use crate::models::forum::Board;
 use crate::routes::AppState;
 use crate::services::feed::{self, Channel, FeedItem};
+use crate::services::public_url;
 
 /// Items per feed. Small enough that polling costs nothing, large enough to be
 /// useful in a reader.
@@ -205,13 +206,10 @@ impl Row {
     }
 }
 
+/// Absolute links for feeds come from the same place as every other public URL, so a
+/// single implementation decides what "this deployment's origin" means.
 fn base_for(state: &AppState, headers: &HeaderMap) -> String {
-    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-    feed::base_url(
-        &state.cfg.public_base_url,
-        header("x-forwarded-proto"),
-        header(header::HOST.as_str()),
-    )
+    public_url::base(&state.cfg.public_base_url, headers)
 }
 
 /// Feeds are XML, not JSON — and the security middleware has already added the

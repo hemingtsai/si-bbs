@@ -49,6 +49,12 @@ pub fn server_with_static(pool: SqlitePool, static_dir: Option<String>) -> TestS
     TestServer::new(create_router_with_static(state, static_dir))
 }
 
+/// Router over an existing pool with a custom config, for tests that need a
+/// differently configured deployment (a public base URL, for instance).
+pub fn server_with_config(pool: SqlitePool, cfg: Config) -> TestServer {
+    TestServer::new(create_router(AppState::new(pool, cfg)))
+}
+
 pub fn test_config(github_api_base: &str) -> Config {
     Config {
         database_url: "sqlite::memory:".into(),
