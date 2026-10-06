@@ -1,22 +1,28 @@
 # API 参考
 
-所有端点都接在同一个 Axum 服务下面（`backend/src/routes.rs`）。出错时统一返回：
+所有端点都接在同一个 Axum 服务下面（`backend/src/routes.rs`）。应用层的错误统一返回：
 
 ```json
 { "error": "具体错误信息" }
 ```
 
+**例外**：提取器层的失败（畸形 JSON、字段类型不对、路径参数不是整数、请求体超过
+2MB）由 axum 直接处理，返回的是纯文本 400/422/413，不带这个 JSON 结构；需要严格
+契约的调用方要把这两种情况都考虑进去。
+
 认证方式：`Authorization: Bearer <access_token>`。`access_token` 有效期 15 分钟，
-`refresh_token` 有效期 7 天（`/api/auth/refresh` 换新）。角色相关的端点不仅校验 token，
-还会回读数据库里的当前角色和封禁状态，因此**改角色、封禁立即生效**，无需等待 token 过期。
+`refresh_token` 有效期 7 天（`/api/auth/refresh` 换新）。**每个**需要登录的端点都会
+回读数据库里的当前角色与封禁状态（不只是角色端点），因此改角色、封禁都立即生效，
+无需等待 token 过期，代价是每个请求多一次主键查询。
 
 权限矩阵：
 
 | 角色 | 说明 |
 | --- | --- |
-| `user` | 注册、提交项目、评分、评论、写 wiki 草稿 |
-| `moderator` | user 全部权限 + 审核队列、编辑/删除任何 wiki 页面、删除项目 |
-| `admin` | moderator 全部权限 + 用户目录、改角色、封禁、彻底清除回收站 |
+| `user` | 注册、提交项目、评分、评论、写 wiki 草稿、发帖/回帖、点赞 |
+| `moderator` | user 全部权限 + 审核队列、编辑/删除任何 wiki 页面、删除任何项目/评论/帖子、精选帖、维护板规、看到全站回收站 |
+| `admin` | moderator 全部权限 + 用户目录、改角色、封禁、彻底清除回收站、站点统计 |
+
 
 ## 健康检查
 
@@ -51,7 +57,7 @@
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/api/projects/{id}/rating` | 登录 | `{score: 1..=10, comment?}`，同一用户重复打分会覆盖 |
+| POST | `/api/projects/{id}/rating` | 登录 | `{score: 1..=10, comment?}`（`comment` ≤1000 字），同一用户重复打分会覆盖；不能给未上架项目打分 |
 | GET | `/api/projects/{id}/rating/summary` | 公开 | `{project_id, average, count}`，平均值保留一位小数 |
 
 ### 评论
@@ -61,6 +67,29 @@
 | GET | `/api/projects/{id}/comments?page=&per_page=` | 公开 | 按时间升序 |
 | POST | `/api/projects/{id}/comments` | 登录 | `{content}`，1–5000 字 |
 | DELETE | `/api/projects/{project_id}/comments/{comment_id}` | 作者/mod+ | 软删除 |
+
+## 论坛
+
+三个固定板块 `models` / `tools` / `life`。**发帖与回复都不经审核**，写完即可见；
+帖子与回复都能点赞（切换式，「每用户每目标一行」由 `forum_likes` 主键保证），
+点赞数与回复数在读取时现算，因此不会出现计数与行数不一致。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/forum/boards` | 公开 | `[{slug, post_count}]`，三个板块及未删帖数 |
+| GET | `/api/forum/posts?board=&q=&page=&per_page=` | 公开 | 只列未删帖；`q` 搜标题与正文；精选优先，其后按时间倒序 |
+| POST | `/api/forum/posts` | 登录 | `{board, title, content}`，标题 ≤200 字、正文 ≤50000 字 |
+| GET | `/api/forum/posts/{id}` | 公开 | 详情，含 `likes_count` / `comments_count` / `is_featured` |
+| PATCH | `/api/forum/posts/{id}` | 作者/mod+ | `{board, title, content}` 整体更新 |
+| DELETE | `/api/forum/posts/{id}` | 作者/mod+ | 软删除，进入回收站 |
+| POST | `/api/forum/posts/{id}/like` | 登录 | 切换点赞，返回 `{liked, likes_count}` |
+| PATCH | `/api/forum/posts/{id}/featured` | mod+ | `{featured: bool}`，精选帖排在列表最前 |
+| GET | `/api/forum/posts/{id}/comments?page=&per_page=` | 公开 | 按时间升序 |
+| POST | `/api/forum/posts/{id}/comments` | 登录 | `{content}`，≤50000 字，免审核 |
+| DELETE | `/api/forum/comments/{id}` | 作者/mod+ | 软删除回复 |
+| POST | `/api/forum/comments/{id}/like` | 登录 | 切换点赞 |
+| GET | `/api/forum/rules?board=` | 公开 | 不带 `board` 返回全部板规；带 `board` 返回总站规 + 该板板规 |
+| PUT | `/api/forum/rules/{board}` | mod+ | `{title, content}`，`board` 可为 `global`/`models`/`tools`/`life` |
 
 ## Wiki
 
@@ -78,13 +107,14 @@
 
 ## 回收站
 
-`kind` 只接受 `wiki` / `project` / `comment`。
+`kind` 接受 `wiki` / `project` / `comment` / `forum_post` / `forum_comment`
+（与 `trash_view` 的联合分支一一对应，有测试保证两者不漂移）。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/trash` | 登录 | 普通用户只见自己删的；mod+ 可见全部，附 `deleted_by_username` |
-| POST | `/api/trash/{kind}/{id}/restore` | 删除者/staff | 恢复；唯一键仍被占用时理论上可得 409 |
-| DELETE | `/api/trash/{kind}/{id}` | admin | 彻底删除，不可恢复 |
+| GET | `/api/trash` | 登录 | 普通用户只见自己删的；mod+ 可见全部，附 `deleted_by_username`。**不分页，返回全部** |
+| POST | `/api/trash/{kind}/{id}/restore` | 删除者/staff | 恢复；唯一键仍被占用时返回 409 |
+| DELETE | `/api/trash/{kind}/{id}` | admin | 彻底删除，不可恢复。同一事务内先删依赖它的子行（评论、评分、回复、点赞） |
 
 软删除的行仍然占着原来的 UNIQUE 键（如 `projects.github_url`、`wiki_pages.slug`），
 所以同一 URL/slug 在恢复前不能被重新使用。

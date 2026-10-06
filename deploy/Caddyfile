@@ -1,5 +1,8 @@
 {
-	email hemingtsai@hotmail.com
+	# ACME account contact. Left unset in the repository so the published config
+	# carries no personal address; set it on the host (Caddy works without it, but
+	# then certificate-expiry notices have nowhere to go).
+	# email ops@example.com
 }
 
 # Production site. The backend binary listens on 127.0.0.1:3000 and handles the

@@ -1,7 +1,13 @@
 # 性能与并发
 
 目标：一台 **Alpine 1C1G**（1 vCPU / 1 GiB）扛 300 并发请求，P95 响应时间
-低于 250ms。当前实现已经达到这个目标，下面是怎么测、怎么得来的。
+低于 250ms。
+
+**诚实说明当前证据**：仓库里的压测工件只覆盖到 **64 并发**（`deploy/k6.js` 是
+64 VU、`loadtest.sh` 默认 `C=64`、下面 ab 的数字也是 `-c 64`）。300 并发这个目标
+目前**没有可复现的工件**支撑，也没有在 1C1G 上验证过——要下结论得先把 k6 场景调到
+300 VU 并留下输出。此外 `ConcurrencyLimitLayer(64)` 会把同时在处理的请求限制在 64，
+超出的请求排队等待，因此"300 并发"在实现上表现为排队而不是 300 路真并行。
 
 ## 实测基线
 
@@ -9,16 +15,16 @@
 
 ```bash
 docker build -t si-bbs .
-docker run -d -p 3001:3000 -e JWT_SECRET=test-secret si-bbs
+docker run -d -p 3001:3000 -e JWT_SECRET=$(openssl rand -hex 32) si-bbs
 ab -n 2000 -c 64 http://localhost:3001/api/projects
 # Complete requests: 2000  Failed: 0  Requests/s: ~491
 ab -n 1000 -c 64 http://localhost:3001/api/health
 # Complete requests: 1000  Failed: 0  Requests/s: ~923
 ```
 
-开发机（macOS arm64，Docker Desktop）上的数字不直接代表 1C1G 的真实值，
-但说明热路径没有需要优化的 IO。在 1C1G 目标机上跑 `deploy/k6.js` 得到：
-`GET /api/projects` 在 64 VU 下 P95 ≈ 90ms，错误率 0。
+开发机（macOS arm64，Docker Desktop）上的数字不直接代表 1C1G 的真实值。
+据称在 1C1G 目标机上 `GET /api/projects` 在 64 VU 下 P95 ≈ 90ms、错误率 0，
+但仓库里没有留存这次运行的输出，转述而非证据。
 
 ## 为什么够快
 
@@ -28,8 +34,10 @@ ab -n 1000 -c 64 http://localhost:3001/api/health
    内存占用。
 3. **SQLite WAL + 读多写少**：WAL 允许读者并发；写入走单连接串行，BBS 写入极小。
    `PRAGMA foreign_keys=ON` 只有约束开销，没有锁竞争。
-4. **JWT 校验无库查询**：`require_auth` 纯验签名；只有 `require_role` 做了一次
-   主键查询（见架构文档的权限决策）。
+4. **每次请求一次主键查询换权限即时生效**：`require_auth` 除了验签，还会回读
+   `users.role/banned`（封禁立即 403、角色以库为准），`require_role` 只是其上的
+   白名单。这是有意用一次索引查询换掉"旧 token 权限过期"这个安全问题，
+   在 SQLite 上可忽略；早期版本只在角色端点上查库，代价是权限撤销有 15 分钟窗口。
 5. **Argon2 用 `spawn_blocking`**：哈希计算不阻塞 Tokio 线程，慢请求不波及健康检查。
 6. **静态资源预压缩**：前端构建时写出 `.br`/`.gz`，后端 `ServeDir` 显式开启
    `precompressed_br()/precompressed_gzip()` 后直接按 `Accept-Encoding` 送预压缩件，
@@ -50,7 +58,7 @@ ab -n 1000 -c 64 http://localhost:3001/api/health
 | 项目元数据陈旧 | `stars`/`forks`/`topics` 只在提交时抓取，之后不再更新，"按星排序"会逐渐失真 | 尚未实现；需与 README 刷新共用一次 `GET /repos/{owner}/{repo}` |
 | GitHub API 限速 | 匿名 60 次/小时/IP | 配置 `GITHUB_TOKEN` 提到 5000 次/小时 |
 | 首屏 JS 体积 | marked+highlight 很重 | 已用 `highlight.js/lib/common` 而非全量（省约 1MB），按路由懒加载详情页 |
-| 并发压垮内存 | 瞬时大流量 | `ConcurrencyLimitLayer(64)` 控并发；超限直接 503 |
+| 并发压垮内存 | 瞬时大流量 | `ConcurrencyLimitLayer(64)` 限并发——注意它是**排队背压**，不是快速失败/503；要拒绝得另加 `LoadShedLayer` |
 
 ## 复现压测
 

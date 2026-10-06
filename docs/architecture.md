@@ -20,22 +20,26 @@
 - **SQLite** 用 WAL 模式，`PRAGMA foreign_keys = ON`，迁移由 sqlx 管理。
   并发写入在 SQLite 下是串行化的，但 BBS 的写入很小，读远多于写，单文件换来零运维。
 - **mimalloc** 作为全局分配器，在 Alpine musl 目标上显著降低碎片。
-- **tower::limit::ConcurrencyLimitLayer(64)** 限制同时在处理的请求数；
-  超过即快速失败，避免 1C1G 小机器被打爆。
+- **tower::limit::ConcurrencyLimitLayer(64)** 限制同时在处理的请求数。它是**背压**：
+  超出后请求排队等待空位，而不是立刻返回 503。这层挂在静态回退之后，所以静态资源
+  也受它约束。
 
 ## 模块布局（`backend/src`）
 
 | 模块 | 职责 |
 | --- | --- |
-| `config.rs` | 环境变量 → `Config`（DB、JWT 密钥、GitHub token、静态目录路径） |
-| `db.rs` | 连接池、WAL、外键、跑迁移 |
-| `error.rs` | 统一错误类型，输出 `{ "error": ... }` JSON |
+| `config.rs` | 环境变量 → `Config`（DB、JWT 密钥、GitHub token、GitHub API base）；release 构建缺 JWT_SECRET 时直接拒绝启动 |
+| `db.rs` | 连接池、外键、跑迁移（WAL 由连接串/PRAGMA 保证） |
+| `error.rs` | 统一错误类型，输出 `{ "error": ... }` JSON；5xx 写 ERROR 日志 |
 | `models/` | `sqlx::FromRow` 结构 + 对外 DTO（`ProjectOut`、`Page<T>`…） |
 | `services/auth.rs` | Argon2 哈希（`spawn_blocking`）、JWT 签发/校验 |
 | `services/github.rs` | GitHub REST 客户端（`GITHUB_API_BASE` 可覆盖以便测试）、README base64 解码 |
-| `middleware/auth.rs` | `require_auth`（只验 token）、`require_role`（回读数据库角色与封禁状态） |
-| `handlers/` | 按领域分文件：`auth`、`project`、`rating`、`comment`、`wiki`、`trash`、`admin` |
-| `routes.rs` | `AppState`、路由表、并发上限、SPA 静态文件回退 |
+| `services/ratelimit.rs` | 进程内固定窗口限流（登录失败按账号、注册按进程） |
+| `services/validate.rs` | 用户名/邮箱/密码的纯函数校验（长度按字符计） |
+| `middleware/auth.rs` | `require_auth`（验 token **并回读数据库**：封禁 403、角色以库为准）、`require_role` |
+| `middleware/security.rs` | CSP 等安全响应头、`/assets/*` 长缓存、静态响应的 `Vary` |
+| `handlers/` | 按领域分文件：`auth`、`project`、`rating`、`comment`、`wiki`、`forum`、`trash`、`admin` |
+| `routes.rs` | `AppState`、路由表、访问日志/并发上限/安全头的层顺序、SPA 静态文件回退 |
 
 前端（`frontend/src`）：
 
@@ -64,9 +68,11 @@ README 和 wiki 页面直接存 Markdown 源文，后端永不生成 HTML。前�
 "GitHub 宕机"与"仓库没有 README"仍然区分处理：前者保留缓存，后者清空缓存。
 
 **3. 权限判断以数据库为准。**
-`require_role` 先验 JWT，再查一次 `users.role/banned`。这样隐式地把两个安全
-问题（旧 token 权限过期、封禁用户仍能用到 token 过期）都解决了。代价是每个
-受保护端点多一次主键查询，对 SQLite 可以忽略。
+`require_auth` 先验 JWT，再查一次 `users.role/banned`，把 token 里的角色覆盖为
+数据库当前值；`require_role` 只是它之上的角色白名单。因此**每个**受保护端点
+（而不只是角色端点）都能即时响应改角色与封禁——早期只有 `require_role` 查库，
+于是被封禁的人仍能用旧 token 发帖、被降级的 moderator 仍能删他人内容。
+代价是每个受保护请求多一次主键查询，对 SQLite 可以忽略。
 
 **4. refresh token 不继承旧角色。**
 `/api/auth/refresh` 会重新读取目标用户的当前角色与封禁状态再签发新 token。
@@ -74,14 +80,17 @@ README 和 wiki 页面直接存 Markdown 源文，后端永不生成 HTML。前�
 管理员永远能续期出管理员 token"。
 
 **5. 软删除 + trash_view。**
-三张表（`wiki_pages`、`projects`、`comments`）都有 `deleted_at/deleted_by`，
-`trash_view` 是一个 UNION 视图，`/api/trash` 只读它。恢复只清空被删标记；
-彻底删除由 admin 专属端点做。软删除的行仍占着原唯一键，所以 URL/slug
-在恢复前不会被占用——这避免了"恢复时唯一冲突"的歧义。
+五张表（`wiki_pages`、`projects`、`comments`、`forum_posts`、`forum_comments`）
+都有 `deleted_at/deleted_by`，`trash_view` 是一个 UNION 视图，`/api/trash` 只读它。
+恢复只清空被删标记；彻底删除由 admin 专属端点做，并在**同一事务**内先删依赖它的
+子行（评论、评分、回复、点赞）——这些外键没有 `ON DELETE` 规则，直接删父行会被
+SQLite 以外键错误拒绝。软删除的行仍占着原唯一键，所以 URL/slug 在恢复前不会被
+占用——这避免了"恢复时唯一冲突"的歧义。
 
 **6. 单写者 SQLite + 并发上限。**
 对的：读多写少、单机部署。`ConcurrencyLimitLayer(64)` 配合 `tokio::main(current_thread)`，
-1C1G 上不会因线程数暴涨而崩。
+1C1G 上不会因线程数暴涨而崩。注意它是排队而非拒绝：过载时表现为延迟上升，
+要快速失败得另加 `LoadShedLayer` 或超时层。
 
 ## 数据库 Schema（见 `backend/migrations/`）
 
@@ -92,12 +101,24 @@ wiki_pages  id, title, slug*, category, content, status, author_id→users,
 projects    id, name, github_url*, owner, repo, description, readme_raw,
             language, stars, forks, license, topics, category, status,
             submitted_by→users, reviewed_by→users, review_note,
-            readme_fetched_at, deleted_at, deleted_by, created_at, updated_at
+            readme_fetched_at, readme_attempted_at, deleted_at, deleted_by,
+            created_at, updated_at
 ratings     id, project_id→projects, user_id→users, score (1..10), comment,
             UNIQUE(project_id, user_id), created_at, updated_at
 comments    id, project_id→projects, user_id→users, content, status,
             deleted_at, deleted_by, created_at
-trash_view  kind, id, name, deleted_at, deleted_by  （视图，不落盘）
+forum_posts      id, board (models|tools|life), title, content, author_id→users,
+                 is_featured, deleted_at, deleted_by, created_at, updated_at
+forum_comments   id, post_id→forum_posts, author_id→users, content,
+                 deleted_at, deleted_by, created_at
+forum_likes      user_id→users, target_kind (post|comment), target_id, created_at,
+                 PRIMARY KEY(user_id, target_kind, target_id)
+forum_rules      board (global|models|tools|life, PK), title, content,
+                 updated_by→users, updated_at
+trash_view  kind, id, name, deleted_at, deleted_by  （视图，UNION 五种 kind，不落盘）
 ```
 
-`*` 表示 UNIQUE 约束。外键在 `PRAGMA foreign_keys=ON` 下生效。
+`*` 表示 UNIQUE 约束。外键在 `PRAGMA foreign_keys=ON` 下生效（sqlx 对每条连接默认开启）。
+
+点赞数与回复数**不是列**：`forum_likes` / `forum_comments` 是唯一事实来源，
+读取时用子查询现算。手工维护的计数列在并发点赞下会与行数漂移，且永久留错。

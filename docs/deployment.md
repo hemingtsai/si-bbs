@@ -32,8 +32,8 @@ curl -X POST http://localhost:3000/api/auth/register \
 sqlite3 /path/to/si-bbs.db "UPDATE users SET role='admin' WHERE username='admin'"  # 或直接改数据库
 ```
 
-> 没有 `sqlite3` CLI 的话，也可以临时去掉 `--release` 用 `cargo run`，直接在代码里
-> 把第一个用户插入成 admin，或用 `docker exec` 进容器用 `sqlite3`。
+> 运行镜像里**没有** `sqlite3` CLI（只有 busybox），所以改库要么在宿主机上对
+> 挂载出来的库文件执行，要么临时起来一个带 sqlite3 的容器把卷挂进去。
 
 ### Docker Compose
 
@@ -41,14 +41,15 @@ sqlite3 /path/to/si-bbs.db "UPDATE users SET role='admin' WHERE username='admin'
 JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml up -d
 ```
 
-`deploy/docker-compose.yml` 只是官方镜像的薄封装，按需修改端口和环境变量。
+`deploy/docker-compose.yml` 是本地构建（`build: ..`，仓库不发布镜像）的薄封装：
+端口只绑到 `127.0.0.1`、带 healthcheck 与日志轮转，环境变量按需修改。
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PORT` | `3000` | 监听端口（当前代码硬编码 3000，注意） |
-| `DATABASE_URL` | `sqlite:///data/si-bbs.db?mode=rwc` | SQLite 路径 |
+| `BIND_ADDR` | `0.0.0.0:3000` | 监听地址。前面有 Caddy/nginx 时应设 `127.0.0.1:3000`，否则 API 直接暴露在公网（明文、无限流）。compose 里已经这么设了。**没有 `PORT` 这个变量。** |
+| `DATABASE_URL` | `sqlite:///data/si-bbs.db?mode=rwc`（镜像内）；直接跑二进制时是 `sqlite://si-bbs.db?mode=rwc` | SQLite 路径 |
 | `JWT_SECRET` | 开发构建：`dev-secret-change-me`；**release 构建：无默认值** | 生成用 `openssl rand -hex 32`。release 二进制在缺省、仍是开发值、或短于 32 字节时**直接拒绝启动**（`fatal: JWT_SECRET ...`，退出码 1），因为该默认值是公开字符串，任何人都能据此伪造管理员 token。 |
 | `ACCESS_TTL_SECS` | `900` | access token 有效期 |
 | `REFRESH_TTL_SECS` | `604800` | refresh token 有效期 |
@@ -57,8 +58,7 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml u
 | `STATIC_DIR` | (未设置则不对外服务静态文件) | 前端产物目录，镜像内为 `/app/static` |
 | `RUST_LOG` | `si_bbs_backend=info,tower_http=info` | tracing 过滤 |
 
-> 注意：`main.rs` 目前把监听地址写死为 `0.0.0.0:3000`。如果需要用 `PORT`，
-> 把 `Config` 里读 `PORT` 再传给 `TcpListener::bind` 即可（一处改动）。
+> 监听地址由 `BIND_ADDR` 决定（默认 `0.0.0.0:3000`），代码里没有 `PORT`。
 
 ### 探针、日志与停机
 
@@ -114,26 +114,22 @@ Debian/Ubuntu/Alpine/甚至 scratch 容器里都能直接跑。
 
 ## Nginx 反向代理（可选）
 
-单进程已经足够，nginx 只是用来 TLS 终止或加更多限流时：
+单进程已经足够，nginx 只值得在需要 TLS 终止或额外限流时引入。两种形态：
 
-```nginx
-# 参考 nginx/si-bbs.conf
-server {
-    listen 80;
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+1. **全部交给二进制**：一个 `location / { proxy_pass http://127.0.0.1:3000; }`。
+   安全头、`.br`/`.gz` 预压缩件、深链回退都由后端处理；
+   此时 nginx 上的 `gzip_static on` **没有任何作用**（它只对 nginx 自己从磁盘
+   读的文件生效）。
+2. **nginx 自己服务前端**：那就是 `nginx/si-bbs.conf` 的写法——`root` 指向
+   `dist`、`try_files $uri /index.html` 做深链回退、`/api/` 单独反代、
+   `/assets/` 加 immutable 缓存与安全头，并显式声明
+   `gzip_static on`（Brotli 需要额外编译 ngx_brotli 后开 `brotli_static`）。
 
-前端构建时生成的 `.br`/`.gz` 预压缩文件已经由后端直接提供，nginx 开
-`gzip_static on` 即可命中 `.gz`。
+   只有形态 2 才能命中预压缩件，也只有它能在 STATIC_DIR 为空时正确回退——
+   形态 1 的纯反代写法会让 `/forum/1` 的刷新直接落到后端的 JSON 404。
 
 ## 升级与备份
 
-- **备份**：停掉写入或直接复制 `si-bbs.db-wal` 为空时的 `si-bbs.db` 和 `si-bbs.db-wal`
-  即可（WAL 模式下最稳的方式是先 `PRAGMA wal_checkpoint(TRUNCATE)`）。
-- **升级**：替换二进制镜像 → 重启容器。迁移由 sqlx 在启动时自动跑。
+- **备份**：先 `PRAGMA wal_checkpoint(TRUNCATE)`（或正常停服，停机流程会自动
+  checkpoint），再复制 `si-bbs.db`。
+- **升级**：替换二进制/镜像 → 重启。迁移由 sqlx 在启动时自动跑。

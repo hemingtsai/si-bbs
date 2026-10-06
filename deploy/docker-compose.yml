@@ -1,13 +1,31 @@
 services:
   si-bbs:
     build: ..
+    # Bound to the loopback interface on purpose. Publishing "3000:3000" puts the
+    # API on every interface in plaintext with no rate limiting, which defeats the
+    # documented setup where Caddy terminates TLS and the backend listens on
+    # 127.0.0.1 only. Change this to "3000:3000" only if nothing else fronts it.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - si-bbs-data:/data
     environment:
+      BIND_ADDR: 127.0.0.1:3000
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    # The image declares HEALTHCHECK against /api/health, which also queries SQLite.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    # Keep json-file logs from growing without bound on a small host.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:
