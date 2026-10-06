@@ -71,6 +71,7 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         .route("/api/health", get(health))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/refresh", post(auth::refresh))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/password", post(auth::change_password))
@@ -233,6 +234,12 @@ pub fn create_router_with_static(state: AppState, dir: Option<String>) -> Router
         // `Content-Encoding` alone, so nothing is compressed twice. The size
         // predicate keeps small JSON lists from paying for a gzip round trip.
         .layer(CompressionLayer::new().compress_when(SizeAbove::new(COMPRESSION_MIN_BYTES)))
+        // Every write that authenticates with a cookie needs the double-submit
+        // token; Bearer requests are exempt (see `middleware::csrf`).
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::csrf::require_csrf,
+        ))
         .layer(axum::middleware::from_fn(
             crate::middleware::security::security_headers,
         ))

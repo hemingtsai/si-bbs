@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod auth;
+pub mod cookies;
 pub mod diff;
 pub mod feed;
 pub mod github;

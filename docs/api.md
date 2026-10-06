@@ -38,6 +38,7 @@
 | POST | `/api/auth/login` | `{username, password}` | 200 `{access_token, refresh_token, role, user_id, username}` | 封禁账号返回 403；同一账号（忽略大小写）在 5 分钟内失败 8 次后返回 429 并带 `Retry-After`，登录成功即清零 |
 | POST | `/api/auth/forgot` | `{email}` | 202 `{status}` | 申请重置链接。**无论邮箱是否存在都返回同一个 202 体**（否则就是账号存在性预言机），响应里也绝不含 token。按地址与进程双重限流，被限流时同样返回通用 202 |
 | POST | `/api/auth/reset` | `{token, new_password}` | 200 `{status}` | 用链接里的 token 设新密码。token 一次性、30 分钟过期、请求新链接会作废旧的；成功后 `token_version` 自增，**所有既有会话失效**（不会自动登录）。token 无效/过期/已用一律 400，不区分原因 |
+| POST | `/api/auth/logout` | — | 200 | 清除会话 cookie（不吊销其它设备的 token） |
 | POST | `/api/auth/refresh` | `{refresh_token}` | 200 `{access_token, refresh_token}` | 会重新读取数据库角色；被封禁或被删返回 403/401 |
 | GET | `/api/auth/me` | — | 200 `{id, username, email, role, banned}` | 角色以数据库为准 |
 | GET | `/api/auth/profile` | 登录 | 自己的资料：`{id, username, display_name, email, bio, avatar_url, role, banned, created_at}` |
@@ -154,6 +155,27 @@
 | PATCH | `/api/admin/users/{id}/role` | `{role}`，不能降级唯一的 admin，不能降级自己 |
 | PATCH | `/api/admin/users/{id}/ban` | `{banned: true|false}`，不可封禁自己或唯一的 admin |
 | GET | `/api/admin/stats` | `{users, users_banned, projects, projects_pending, projects_approved, wiki_published, comments, ratings, trashed}` |
+
+## 会话：Bearer 头与 httpOnly cookie
+
+同一个接口支持两种认证来源，**`Authorization: Bearer` 优先**：
+
+| 来源 | 谁在用 | 说明 |
+| --- | --- | --- |
+| `Authorization: Bearer <access>` | API 客户端、全部自动化测试 | 行为与从前完全一致 |
+| Cookie | 浏览器前端 | `access_token`（HttpOnly、`Path=/api`）、`refresh_token`（HttpOnly、`Path=/api/auth`）、`csrf_token`（**非** HttpOnly，供前端读取后回填请求头） |
+
+- 登录、刷新、改密码都会 `Set-Cookie`，**同时照旧在 JSON 体里返回 token 对**——
+  因此 API 与测试不需要任何改动。
+- 三个 cookie 都是 `SameSite=Lax`：跨站 POST 不会带上它们，这本身就挡住了 CSRF。
+- **CSRF 双保险**：凡是"用 cookie 认证 + 非安全方法（非 GET/HEAD/OPTIONS）"的请求，
+  必须带 `x-csrf-token`，且与 `csrf_token` cookie 完全相等，否则 403
+  `{"error":"missing or invalid CSRF token","code":"csrf"}`。带 Bearer 头的请求豁免
+  （攻击者无法跨站设置该头）。这一层是中间件，新增接口不会漏。
+- `POST /api/auth/logout` 清空三个 cookie；`COOKIE_SECURE=true` 时附加 `Secure`
+  （本地 http 开发默认关闭，生产上 TLS 部署应打开）。
+- 浏览器端因此不再把 token 放进 `localStorage`：XSS 拿不到 token，token 也不会被
+  非本源请求带走。
 
 ## 密码找回的投递方式
 

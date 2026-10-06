@@ -822,6 +822,7 @@ async fn github_token_is_sent_when_configured() {
             .join("si-bbs-test-uploads")
             .to_string_lossy()
             .into_owned(),
+        cookie_secure: false,
         max_upload_bytes: 5 * 1024 * 1024,
     };
     let app = si_bbs_backend::create_router(si_bbs_backend::routes::AppState::new(pool, cfg));

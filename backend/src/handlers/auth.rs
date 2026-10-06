@@ -8,7 +8,7 @@ use crate::middleware::auth::require_auth;
 use crate::models::user::{Role, current_privileges};
 use crate::routes::AppState;
 use crate::services::auth;
-use crate::services::{password_reset, validate};
+use crate::services::{cookies, password_reset, validate};
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
@@ -78,7 +78,7 @@ pub struct LoginReq {
 pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginReq>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     // One bucket per account, case-folded so `Alice` and `alice` share a budget.
     let limit_key = body.username.trim().to_lowercase();
     if let Some(retry_after_secs) = state.login_limiter.retry_after(&limit_key) {
@@ -113,26 +113,64 @@ pub async fn login(
     let role = Role::parse(&role_str).unwrap_or(Role::User);
     let (access, refresh) = auth::issue_pair(&state.cfg, id, &username, role, token_version)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({
-        "access_token": access,
-        "refresh_token": refresh,
-        "role": role.as_str(),
-        "user_id": id,
-        "username": username,
-    })))
+    Ok((
+        session_cookie_jar(&state, &access, &refresh),
+        Json(serde_json::json!({
+            "access_token": access,
+            "refresh_token": refresh,
+            "role": role.as_str(),
+            "user_id": id,
+            "username": username,
+        })),
+    ))
 }
 
-#[derive(Deserialize)]
+/// The `Set-Cookie` headers for a browser session, plus a fresh CSRF token.
+///
+/// The JSON body still carries the tokens: the API and the whole test suite use
+/// `Authorization: Bearer`, and only the frontend uses the cookies.
+fn session_cookie_jar(
+    state: &AppState,
+    access: &str,
+    refresh: &str,
+) -> axum::response::AppendHeaders<[(axum::http::HeaderName, String); 3]> {
+    let cookies = cookies::session_cookies(
+        access,
+        refresh,
+        &cookies::new_csrf_token(),
+        state.cfg.access_ttl_secs,
+        state.cfg.refresh_ttl_secs,
+        state.cfg.cookie_secure,
+    );
+    axum::response::AppendHeaders([
+        (axum::http::header::SET_COOKIE, cookies[0].clone()),
+        (axum::http::header::SET_COOKIE, cookies[1].clone()),
+        (axum::http::header::SET_COOKIE, cookies[2].clone()),
+    ])
+}
+
+#[derive(Deserialize, Default)]
 pub struct RefreshReq {
-    pub refresh_token: String,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
+/// Exchange a refresh token for a new pair.
+///
+/// The token may arrive in the body (API clients) or in the httpOnly refresh cookie
+/// (browser). Rotation also refreshes the cookies, so a browser session keeps
+/// sliding without JavaScript ever seeing a token.
 pub async fn refresh(
     State(state): State<AppState>,
-    Json(body): Json<RefreshReq>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let claims = auth::verify(&state.cfg, &body.refresh_token, "refresh")
-        .map_err(|_| AppError::Unauthorized)?;
+    headers: HeaderMap,
+    body: Option<Json<RefreshReq>>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let from_body = body.and_then(|Json(req)| req.refresh_token);
+    let presented = from_body
+        .or_else(|| cookies::read(&headers, cookies::REFRESH_COOKIE))
+        .ok_or(AppError::Unauthorized)?;
+    let claims =
+        auth::verify(&state.cfg, &presented, "refresh").map_err(|_| AppError::Unauthorized)?;
 
     // The role is re-read from the database instead of being copied out of the
     // refresh token. Without this a demoted admin could keep minting admin
@@ -161,10 +199,24 @@ pub async fn refresh(
         privs.token_version,
     )
     .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({
-        "access_token": access,
-        "refresh_token": refresh,
-    })))
+    Ok((
+        session_cookie_jar(&state, &access, &refresh),
+        Json(serde_json::json!({
+            "access_token": access,
+            "refresh_token": refresh,
+        })),
+    ))
+}
+
+/// Drop the session cookies. The JSON tokens are the client's to forget, so this only
+/// has to clear what the server set.
+pub async fn logout(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let cleared = cookies::clear_cookies(state.cfg.cookie_secure);
+    axum::response::AppendHeaders([
+        (axum::http::header::SET_COOKIE, cleared[0].clone()),
+        (axum::http::header::SET_COOKIE, cleared[1].clone()),
+        (axum::http::header::SET_COOKIE, cleared[2].clone()),
+    ])
 }
 
 pub async fn me(
@@ -210,7 +262,7 @@ pub async fn change_password(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<PasswordChangeReq>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     let claims = require_auth(&state, &headers).await?;
     validate::password(&body.new_password).map_err(AppError::BadRequest)?;
     if body.new_password == body.current_password {
@@ -265,13 +317,18 @@ pub async fn change_password(
         user_id = claims.sub,
         "password changed; older tokens invalidated"
     );
-    Ok(Json(serde_json::json!({
-        "access_token": access,
-        "refresh_token": refresh,
-        "role": role.as_str(),
-        "user_id": claims.sub,
-        "username": username,
-    })))
+    // The cookies have to be reissued too: the tokens the browser holds were just
+    // invalidated, and a browser-only client has no other way to learn the new pair.
+    Ok((
+        session_cookie_jar(&state, &access, &refresh),
+        Json(serde_json::json!({
+            "access_token": access,
+            "refresh_token": refresh,
+            "role": role.as_str(),
+            "user_id": claims.sub,
+            "username": username,
+        })),
+    ))
 }
 
 #[derive(Deserialize)]

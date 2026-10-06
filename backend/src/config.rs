@@ -24,6 +24,9 @@ pub struct Config {
     pub upload_dir: String,
     /// Largest accepted upload, in bytes.
     pub max_upload_bytes: usize,
+    /// Mark the session cookies `Secure`. Off by default so plain-http local
+    /// development works; a deployment behind TLS should set `COOKIE_SECURE=true`.
+    pub cookie_secure: bool,
 }
 
 /// Decide which JWT secret the process is allowed to run with.
@@ -99,6 +102,13 @@ impl Config {
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
             public_base_url: env::var("PUBLIC_BASE_URL").unwrap_or_default(),
             upload_dir: env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".into()),
+            cookie_secure: matches!(
+                env::var("COOKIE_SECURE")
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "1" | "true" | "yes"
+            ),
             max_upload_bytes: env::var("MAX_UPLOAD_BYTES")
                 .ok()
                 .and_then(|v| v.parse().ok())

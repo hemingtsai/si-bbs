@@ -62,6 +62,7 @@ pub fn test_config(github_api_base: &str) -> Config {
             .join("si-bbs-test-uploads")
             .to_string_lossy()
             .into_owned(),
+        cookie_secure: false,
         max_upload_bytes: 5 * 1024 * 1024,
     }
 }
